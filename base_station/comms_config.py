@@ -13,6 +13,7 @@
 #     LAN IP of the Master PC (e.g. '192.168.1.50').
 # =============================================================================
 
+import os
 import sys
 
 # -----------------------------------------------------------------------------
@@ -20,8 +21,14 @@ import sys
 # Windows: 'COM3', 'COM17', etc.   Linux: '/dev/ttyUSB0', etc.
 # -----------------------------------------------------------------------------
 
+# Physical persistent by-id hardware symlink for Base Station XBee (FTDI B0025BN0)
+BASE_XBEE_BY_ID     = '/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_B0025BN0-if00-port0'
+
 # XBee radio connected to this PC for Joystick → Rover teleop commands
-TELEOP_XBEE_PORT    = '/dev/ttyUSB0' if sys.platform != 'win32' else 'COM3'
+if sys.platform != 'win32':
+    TELEOP_XBEE_PORT = BASE_XBEE_BY_ID if os.path.exists(BASE_XBEE_BY_ID) else '/dev/ttyUSB0'
+else:
+    TELEOP_XBEE_PORT = 'COM3'
 
 # XBee radio connected to this PC for forwarding RTCM corrections to Rover
 GPS_XBEE_PORT       = '/dev/ttyUSB1' if sys.platform != 'win32' else 'COM18'

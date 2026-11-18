@@ -40,13 +40,23 @@ import webbrowser
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
 
-from comms_config import TELEOP_XBEE_PORT, UDP_JOY_PORT, UDP_RTCM_PORT, UDP_STATUS_PORT
+from comms_config import TELEOP_XBEE_PORT, UDP_JOY_PORT, UDP_RTCM_PORT, UDP_STATUS_PORT, scan_available_ports
 
 
 class BaseStationSupervisor:
     def __init__(self, port=None, enable_gps=False, enable_web=True, enable_teleop=True,
                  dev_mode=False, skip_build=False, open_browser=True):
-        self.port = port if port else TELEOP_XBEE_PORT
+        if port:
+            self.port = port
+        elif os.path.exists(TELEOP_XBEE_PORT):
+            self.port = TELEOP_XBEE_PORT
+        else:
+            avail = scan_available_ports()
+            if avail:
+                self.port = avail[0]
+                print(f"ℹ️ Auto-detected available XBee port: {self.port}")
+            else:
+                self.port = TELEOP_XBEE_PORT
         self.enable_gps = enable_gps
         self.enable_web = enable_web
         self.enable_teleop = enable_teleop
