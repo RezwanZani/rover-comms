@@ -151,6 +151,8 @@ class RoverTelemetryNode(Node):
 
         self.speed_mps = 0.0
         self.direction_deg = 0.0
+        self.cmd_linear_x = 0.0
+        self.cmd_angular_z = 0.0
         self.last_vel_time = 0.0
 
         self.motors = [
@@ -303,9 +305,11 @@ class RoverTelemetryNode(Node):
             self.last_vel_time = time.time()
 
     def _on_cmd_vel(self, msg: Twist):
-        # Fallback velocity estimation if odom is absent
+        # Track command velocities and fallback speed estimation if odom is absent
         now = time.time()
         with self.lock:
+            self.cmd_linear_x = float(msg.linear.x)
+            self.cmd_angular_z = float(msg.angular.z)
             if now - self.last_vel_time > 1.0:
                 self.speed_mps = abs(float(msg.linear.x))
 
@@ -330,6 +334,18 @@ class RoverTelemetryNode(Node):
             d = json.loads(msg.data)
             with self.lock:
                 self.radio_rx_stats = d
+                if "vx" in d and d.get("vx") is not None:
+                    self.cmd_linear_x = float(d["vx"])
+                if "wz" in d and d.get("wz") is not None:
+                    self.cmd_angular_z = float(d["wz"])
+                if all(k in d for k in ("act1", "act2", "act3", "wrist", "gripper")):
+                    self.arm_state = [
+                        float(d.get("act1", 0.0)),
+                        float(d.get("act2", 0.0)),
+                        float(d.get("act3", 0.0)),
+                        float(d.get("wrist", 0.0)),
+                        float(d.get("gripper", 0.0))
+                    ]
         except Exception:
             pass
 
@@ -374,6 +390,10 @@ class RoverTelemetryNode(Node):
                 "velocity": {
                     "speed_mps": round(self.speed_mps, 2),
                     "direction_deg": round(self.direction_deg, 1)
+                },
+                "cmd_vel": {
+                    "linear_x": round(self.cmd_linear_x, 3),
+                    "angular_z": round(self.cmd_angular_z, 3)
                 },
                 "imu": {
                     "pitch": round(self.imu_pitch, 1),

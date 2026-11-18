@@ -152,6 +152,12 @@ class BaseMasterHub:
                 except Exception:
                     pass
 
+            # 3. Forward teleop packet to local GUI backend (UDP 9003)
+            try:
+                self.status_sock.sendto(data, self.status_target)
+            except Exception:
+                pass
+
     def handle_rtcm_data(self, data: bytes):
         """Handle incoming RTCM3 frame: sends via XBee chunks + Dual-Redundant UDP."""
         if not data:
