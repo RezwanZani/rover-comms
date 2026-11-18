@@ -109,13 +109,18 @@ class RoverGPSNode(Node):
     # ---------------- RTCM INJECTION CALLBACK ----------------
     def rtcm_callback(self, msg):
         """Safely injects incoming ROS /rtcm message bytes into GPS serial."""
-        with self.lock:
-            if self.gps_ser and self.gps_ser.is_open:
-                try:
-                    self.gps_ser.write(bytes(msg.message))
-                    self.rtcm_pkt_count += 1
-                except (serial.SerialException, OSError, IOError) as e:
-                    self.get_logger().debug(f"RTCM write error: {e}")
+        try:
+            with self.lock:
+                if self.gps_ser and self.gps_ser.is_open:
+                    try:
+                        self.gps_ser.write(bytes(msg.message))
+                        self.rtcm_pkt_count += 1
+                    except (serial.SerialException, OSError, IOError) as e:
+                        self.get_logger().debug(f"RTCM write error: {e}")
+                        # Mark disconnected so worker loop will reconnect
+                        self.gps_connected = False
+        except Exception as e:
+            self.get_logger().debug(f'[rtcm_callback] Unexpected error: {e}')
 
     # ---------------- SERIAL CLEANUP ----------------
     def _close_gps(self):
@@ -220,23 +225,26 @@ class RoverGPSNode(Node):
 
     # ---------------- STATUS PRINT ----------------
     def display_status(self):
-        ts = datetime.datetime.now().strftime("%H:%M:%S")
+        try:
+            ts = datetime.datetime.now().strftime("%H:%M:%S")
 
-        with self.lock:
-            connected = self.gps_connected
-            lat = self.current_lat
-            lon = self.current_lon
-            qual_code = self.current_quality
-            pkts = self.rtcm_pkt_count
+            with self.lock:
+                connected = self.gps_connected
+                lat = self.current_lat
+                lon = self.current_lon
+                qual_code = self.current_quality
+                pkts = self.rtcm_pkt_count
 
-        if not connected:
-            self.get_logger().info(f"[{ts}] ❌ GPS RTK: DISCONNECTED ({self.gps_port}) | RTCM pkts: {pkts}")
-        elif lat is not None and lon is not None:
-            qual_label = self.fix_labels.get(qual_code, f"Q{qual_code}")
-            gmaps = f"{lat:.8f}, {lon:.8f}"
-            self.get_logger().info(f"[{ts}] {qual_label} | {gmaps} | RTCM pkts: {pkts}")
-        else:
-            self.get_logger().info(f"[{ts}] searching for satellites... | RTCM pkts: {pkts}")
+            if not connected:
+                self.get_logger().info(f"[{ts}] ❌ GPS RTK: DISCONNECTED ({self.gps_port}) | RTCM pkts: {pkts}")
+            elif lat is not None and lon is not None:
+                qual_label = self.fix_labels.get(qual_code, f"Q{qual_code}")
+                gmaps = f"{lat:.8f}, {lon:.8f}"
+                self.get_logger().info(f"[{ts}] {qual_label} | {gmaps} | RTCM pkts: {pkts}")
+            else:
+                self.get_logger().info(f"[{ts}] searching for satellites... | RTCM pkts: {pkts}")
+        except Exception as e:
+            self.get_logger().debug(f'[display_status] Error: {e}')
 
     # ---------------- CLEANUP ----------------
     def destroy_node(self):

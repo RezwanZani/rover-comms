@@ -89,26 +89,47 @@ class BaseMasterHub:
         self._connect_serial()
 
     def _init_sockets(self):
-        """Create and bind non-blocking UDP input sockets and status output socket."""
+        """Create and bind non-blocking UDP input sockets and status output socket.
+        Each socket is created independently so a bind failure on one port
+        does not prevent the others from working.
+        """
         # 1. Joystick UDP socket (Port 9001)
-        self.joy_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.joy_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.joy_sock.bind((UDP_LISTEN_IP, UDP_JOY_PORT))
-        self.joy_sock.setblocking(False)
+        try:
+            self.joy_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.joy_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.joy_sock.bind((UDP_LISTEN_IP, UDP_JOY_PORT))
+            self.joy_sock.setblocking(False)
+        except Exception as e:
+            print(f"[BaseMaster] WARNING: Could not bind joy socket on port {UDP_JOY_PORT}: {e}")
+            self.joy_sock = None
 
         # 2. RTCM UDP socket (Port 9002)
-        self.rtcm_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.rtcm_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.rtcm_sock.bind((UDP_LISTEN_IP, UDP_RTCM_PORT))
-        self.rtcm_sock.setblocking(False)
+        try:
+            self.rtcm_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.rtcm_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.rtcm_sock.bind((UDP_LISTEN_IP, UDP_RTCM_PORT))
+            self.rtcm_sock.setblocking(False)
+        except Exception as e:
+            print(f"[BaseMaster] WARNING: Could not bind RTCM socket on port {UDP_RTCM_PORT}: {e}")
+            self.rtcm_sock = None
 
         # 3. Status forwarding UDP socket (Sends to Port 9003)
-        self.status_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.status_target = (MASTER_IP, UDP_STATUS_PORT)
+        try:
+            self.status_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.status_target = (MASTER_IP, UDP_STATUS_PORT)
+        except Exception as e:
+            print(f"[BaseMaster] WARNING: Could not create status socket: {e}")
+            self.status_sock = None
+            self.status_target = (MASTER_IP, UDP_STATUS_PORT)
 
         # 4. Outgoing Dual-Redundant UDP socket to Rover (Port 8888)
-        self.rover_udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.rover_udp_target = (self.rover_ip, ROVER_UDP_LISTEN_PORT)
+        try:
+            self.rover_udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.rover_udp_target = (self.rover_ip, ROVER_UDP_LISTEN_PORT)
+        except Exception as e:
+            print(f"[BaseMaster] WARNING: Could not create rover UDP socket: {e}")
+            self.rover_udp_sock = None
+            self.rover_udp_target = (self.rover_ip, ROVER_UDP_LISTEN_PORT)
 
         print(f"[BaseMaster] UDP input bound: Joy -> port {UDP_JOY_PORT}, RTCM -> port {UDP_RTCM_PORT}")
         print(f"[BaseMaster] UDP output status target: {self.status_target}")
@@ -324,8 +345,15 @@ class BaseMasterHub:
 
         while self.running:
             try:
+                # Build readable socket list — only include sockets that exist
+                readable = [s for s in [self.joy_sock, self.rtcm_sock] if s is not None]
+
                 # 1. Non-blocking select on UDP inputs with 5ms timeout
-                rlist, _, _ = select.select([self.joy_sock, self.rtcm_sock], [], [], 0.005)
+                if readable:
+                    rlist, _, _ = select.select(readable, [], [], 0.005)
+                else:
+                    time.sleep(0.005)
+                    rlist = []
 
                 for s in rlist:
                     if s is self.joy_sock:

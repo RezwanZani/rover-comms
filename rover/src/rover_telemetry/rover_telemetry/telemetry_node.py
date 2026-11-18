@@ -455,9 +455,13 @@ class RoverTelemetryNode(Node):
         return payload
 
     def _broadcast_tick(self):
-        payload = self._build_telemetry_payload()
-        json_str = json.dumps(payload)
-        json_bytes = json_str.encode('utf-8')
+        try:
+            payload = self._build_telemetry_payload()
+            json_str = json.dumps(payload)
+            json_bytes = json_str.encode('utf-8')
+        except Exception as e:
+            self.get_logger().debug(f'[telemetry] Payload build error: {e}')
+            return
 
         # 1. Dispatch over Network UDP (Wi-Fi)
         if self.enable_udp and self.udp_sock:
@@ -465,6 +469,16 @@ class RoverTelemetryNode(Node):
                 self.udp_sock.sendto(json_bytes, (self.base_ip, self.base_port))
             except Exception as e:
                 self.get_logger().debug(f"UDP send warning: {e}")
+                # Recreate socket on hard failure
+                try:
+                    self.udp_sock.close()
+                except Exception:
+                    pass
+                try:
+                    self.udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    self.udp_sock.setblocking(False)
+                except Exception:
+                    self.udp_sock = None
 
         # 2. Publish to Rover Comms Master (rx_node) to transmit over XBee radio
         try:
@@ -485,16 +499,19 @@ class RoverTelemetryNode(Node):
                 self.get_logger().debug(f"XBee send warning: {e}")
 
         # Rate-limited console log (every 2.5 seconds)
-        now = time.time()
-        if now - self._print_time >= 2.5:
-            self._print_time = now
-            self.get_logger().info(
-                f"[TELEMETRY TX] Bat={payload['battery']['voltage']}V | "
-                f"GPS=({payload['gps']['lat']:.4f}, {payload['gps']['lon']:.4f}) | "
-                f"IMU=(P:{payload['imu']['pitch']:+.1f}°, R:{payload['imu']['roll']:+.1f}°, Y:{payload['imu']['yaw']:+.0f}°) | "
-                f"Speed={payload['velocity']['speed_mps']:.1f}m/s | "
-                f"Uptime={payload['rover_state']['mission_time']}"
-            )
+        try:
+            now = time.time()
+            if now - self._print_time >= 2.5:
+                self._print_time = now
+                self.get_logger().info(
+                    f"[TELEMETRY TX] Bat={payload['battery']['voltage']}V | "
+                    f"GPS=({payload['gps']['lat']:.4f}, {payload['gps']['lon']:.4f}) | "
+                    f"IMU=(P:{payload['imu']['pitch']:+.1f}°, R:{payload['imu']['roll']:+.1f}°, Y:{payload['imu']['yaw']:+.0f}°) | "
+                    f"Speed={payload['velocity']['speed_mps']:.1f}m/s | "
+                    f"Uptime={payload['rover_state']['mission_time']}"
+                )
+        except Exception:
+            pass
 
     def destroy_node(self):
         if self.udp_sock:
