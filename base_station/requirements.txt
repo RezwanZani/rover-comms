@@ -1,0 +1,17 @@
+# AAUB ROVER71 — Base Station Python Dependencies
+# Install with: pip install -r base_station/requirements.txt
+
+# Serial communication with physical XBee radio & GPS modules
+pyserial>=3.5
+
+# Gamepad, joystick, and keyboard teleoperation handling
+pygame>=2.5.0
+
+# WebSocket server for live telemetry and web commands
+websockets>=11.0.3
+
+# Teleop GUI interface
+PyQt5>=5.15.0
+
+# Official Digi XBee Python SDK (used for advanced radio configuration/diagnostics)
+digi-xbee>=1.4.1

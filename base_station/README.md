@@ -99,6 +99,15 @@ XBEE_BAUD_RATE   = 115200
 
 ---
 
+## Dependencies & Installation
+
+Install all required Base Station Python packages:
+```bash
+pip install -r base_station/requirements.txt
+```
+
+---
+
 ## How to Run
 
 ### Automated Multi-Process Launch (Recommended)

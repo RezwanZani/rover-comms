@@ -162,7 +162,7 @@ cd rover-comms
 ### 2. Base Station Setup
 ```bash
 # 1. Install Base Station Python dependencies
-pip3 install pygame pyserial websockets
+pip install -r requirements.txt
 
 # 2. Install React Frontend dependencies
 cd base_station/rover-gui/frontend
