@@ -1,1 +1,0 @@
-../run_rover_all.sh

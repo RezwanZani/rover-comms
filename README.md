@@ -187,9 +187,7 @@ cd ..
 ### 4. Setup Stable Hardware Udev Rules (Rover only)
 Avoid USB serial port swapping upon reboot by installing the provided udev rules:
 ```bash
-cd rover
-sudo ./setup_udev.sh
-cd ..
+sudo python3 rover/src/rover-gps/setup_udev.py
 ```
 This maps:
 - `/dev/rover_900mhz` $\rightarrow$ XBee 900MHz Radio
@@ -204,35 +202,39 @@ This maps:
 Run the master rover launcher on the Jetson/SBC:
 
 ```bash
-# Automatically sources ROS 2 and launches all 4 onboard nodes:
-./run_rover_all.sh
+# Automatically sources ROS 2, compiles if needed, and launches all onboard nodes:
+python3 run_rover_all.py
 ```
 
 *(Optional CLI overrides:)*
 ```bash
 # Override ports or base station IP:
-./run_rover_all.sh xbee_port:=/dev/ttyUSB0 arduino_port:=/dev/ttyACM0 base_ip:=192.168.1.50
+python3 run_rover_all.py xbee_port:=/dev/ttyUSB0 arduino_port:=/dev/ttyACM0 base_ip:=192.168.1.50
 
 # Disable GPS if running indoors for bench testing:
-./run_rover_all.sh enable_gps:=false
+python3 run_rover_all.py enable_gps:=false
 ```
 
 ### Step 2: Start the Base Station Environment
 Run the master base station orchestrator on the operator laptop:
 
 ```bash
-./run_base_station.sh
+# Compiles React production bundle and launches Base Master, Web Backend, Preview Server, & Teleop GUI:
+python3 run_base_station.py
 ```
 
 *(On Windows:)*
 ```bat
-base_station\run_base_station.bat
+python run_base_station.py
+# or: base_station\run_base_station.bat
 ```
 
-This supervisor automatically launches:
-1. `base_master.py` (Priority XBee owner & dual-redundant UDP router)
-2. `backend/main.py` (WebSocket & telemetry server)
-3. `pnpm dev` (React web mission control dashboard)
+This supervisor automatically:
+1. Builds the React web application (`pnpm build -> dist/`)
+2. Launches `base_master.py` (Priority XBee owner & dual-redundant UDP router)
+3. Launches `rover-gui/backend/main.py` (WebSocket & telemetry server on port 8765)
+4. Serves the prebuilt web dashboard via `pnpm preview` on port 5173 and opens browser
+5. Launches `xbee_teleop_windows.py` (Gamepad teleop GUI & Science Actuators panel)
 4. `xbee_teleop_windows.py` (Pygame gamepad control GUI)
 
 Open your browser to: **`http://localhost:5173`**
@@ -276,7 +278,7 @@ You can test the entire dual-redundancy and communication stack on a single deve
 
 ```bash
 # 1. Create virtual serial loopback pair (/tmp/ttyV0 <-> /tmp/ttyV1)
-./create_virtual_pair.sh
+python3 create_virtual_pair.py
 
 # 2. Run protocol and packing unit tests
 python3 tests/test_science_and_mode.py
@@ -314,7 +316,7 @@ sudo chmod 666 /dev/ttyUSB* /dev/ttyACM*
 ```
 
 ### 2. Virtual Serial Ports in GUI Dropdown
-If testing on a laptop without physical radios, run `./create_virtual_pair.sh`. Both `/tmp/ttyV0` and `/tmp/ttyV1` are automatically scanned and will appear in the port selector dropdown on the Web UI.
+If testing on a laptop without physical radios, run `python3 create_virtual_pair.py`. Both `/tmp/ttyV0` and `/tmp/ttyV1` are automatically scanned and will appear in the port selector dropdown on the Web UI.
 
 ### 3. Wi-Fi Failover Latency Verification
 If the XBee radio is disconnected or power cycled during operation, the React GUI diagnostics panel will immediately show `WI-FI (UDP)` within $350\text{ ms}$. When the radio reconnects, it returns to `DUAL (Wi-Fi + RF)`.

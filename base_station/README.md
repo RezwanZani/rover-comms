@@ -30,9 +30,9 @@ base_station/
 ├── comms_config.py            ← Single Source of Truth for Base Station configuration
 ├── base_master.py             ← Central Base Radio Owner & Dual-Redundant Uplink Router
 ├── launch_base_station.py     ← Multi-process supervisor launcher
+├── run_base_station.py        ← Single-command Python launcher (builds & runs everything)
 ├── run_base_station.bat       ← Windows one-click startup batch script
 ├── run_base_master.bat        ← Dedicated Base Master launcher (Windows)
-├── run_base_master.sh         ← Dedicated Base Master launcher (Linux)
 ├── xbee_teleop_windows.py     ← Gamepad Teleoperation GUI (Pygame/Tkinter)
 ├── base_station_windows.py    ← Stationary LC29H(BS) RTK GPS Survey-In Script
 └── rover-gui/                 ← Web Diagnostics & Science Mission Dashboard
@@ -101,13 +101,14 @@ XBEE_BAUD_RATE   = 115200
 ## How to Run
 
 ### Automated Multi-Process Launch (Recommended)
-From repository root:
+From repository root (or inside `base_station/`):
 ```bash
-./run_base_station.sh
+python3 run_base_station.py
 ```
 *(On Windows:)*
 ```bat
-base_station\run_base_station.bat
+python run_base_station.py
+# or: base_station\run_base_station.bat
 ```
 
 Access the Web GCS at: **`http://localhost:5173`**

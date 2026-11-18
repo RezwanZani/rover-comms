@@ -41,7 +41,7 @@ The Rover Onboard subsystem runs on the rover's single-board computer (e.g. NVID
 
 ```
 rover/
-├── setup_udev.sh                  ← Udev rules script for stable serial symlinks
+├── run_rover_all.py               ← Single-command Python launcher for all onboard nodes
 └── src/
     ├── comms_config.py            ← Single Source of Truth for onboard parameters
     │
@@ -108,7 +108,7 @@ rover/
 
 To ensure USB ports never swap upon reboot or replug, install the provided udev rules:
 ```bash
-cd rover && sudo ./setup_udev.sh
+sudo python3 rover/src/rover-gps/setup_udev.py
 ```
 This generates persistent symlinks:
 - `/dev/rover_900mhz` $\rightarrow$ FTDI USB UART (XBee radio)
@@ -128,9 +128,9 @@ source install/setup.bash
 ```
 
 ### 2. Launch All Nodes Simultaneously (Single Command)
-From project root:
+From project root (or inside `rover/`):
 ```bash
-./run_rover_all.sh
+python3 run_rover_all.py
 ```
 
 Or using native ROS 2 launch:
@@ -141,8 +141,8 @@ ros2 launch xbee_teleop rover_all.launch.py
 #### Supported Arguments:
 ```bash
 # Override ports and Base Station IP:
-./run_rover_all.sh xbee_port:=/dev/ttyUSB0 arduino_port:=/dev/ttyACM0 base_ip:=192.168.1.50
+python3 run_rover_all.py xbee_port:=/dev/ttyUSB0 arduino_port:=/dev/ttyACM0 base_ip:=192.168.1.50
 
 # Disable GPS if running indoors on a test bench:
-./run_rover_all.sh enable_gps:=false
+python3 run_rover_all.py enable_gps:=false
 ```
