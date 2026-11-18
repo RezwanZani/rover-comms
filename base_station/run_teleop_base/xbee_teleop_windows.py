@@ -50,6 +50,7 @@ from comms_config import (
     BTN_ACT1, BTN_ACT2, BTN_ACT3, BTN_WRIST,
     AXIS_LT, AXIS_RT, TRIGGER_THRESHOLD, AXIS_DPAD_Y,
     UDP_JOY_PORT, MASTER_IP,
+    scan_available_ports, AVAILABLE_BAUD_RATES,
 )
 
 CONFIG = dict(
@@ -969,12 +970,22 @@ class MainWindow(QWidget):
         bar.addWidget(QLabel('XBee port:'))
         self.port_box = QComboBox()
         self.port_box.setEditable(True)
+        self.port_box.setMinimumWidth(160)
         self.refresh_ports()
         bar.addWidget(self.port_box)
+        self.btn_refresh = QPushButton('↻')
+        self.btn_refresh.setToolTip('Refresh available serial & virtual ports')
+        self.btn_refresh.setFixedWidth(28)
+        self.btn_refresh.clicked.connect(self.refresh_ports)
+        bar.addWidget(self.btn_refresh)
         bar.addWidget(QLabel(' Baud:'))
         self.baud_box = QComboBox()
         self.baud_box.setEditable(True)
-        self.baud_box.addItems(['115200', '57600', '9600'])
+        for b in AVAILABLE_BAUD_RATES:
+            self.baud_box.addItem(str(b))
+        baud_idx = self.baud_box.findText(str(CONFIG.get('baud', XBEE_BAUD_RATE)))
+        if baud_idx >= 0:
+            self.baud_box.setCurrentIndex(baud_idx)
         bar.addWidget(self.baud_box)
         bar.addWidget(QLabel(' Robot radio addr:'))
         self.addr_edit = QLineEdit(ROBOT_RADIO_ADDR)
@@ -1043,7 +1054,11 @@ class MainWindow(QWidget):
         rbar.addWidget(QLabel('Baud:'))
         self.r_baud = QComboBox()
         self.r_baud.setEditable(True)
-        self.r_baud.addItems(['115200', '57600', '9600'])
+        for b in AVAILABLE_BAUD_RATES:
+            self.r_baud.addItem(str(b))
+        r_baud_idx = self.r_baud.findText(str(CONFIG.get('baud', XBEE_BAUD_RATE)))
+        if r_baud_idx >= 0:
+            self.r_baud.setCurrentIndex(r_baud_idx)
         rbar.addWidget(self.r_baud)
         self.radio_btns = []
         for text, fix, send in (('Check', False, False), ('Fix (set AP=1 + save)', True, False),
@@ -1073,7 +1088,8 @@ class MainWindow(QWidget):
         self.timers = []
         for ms, fn in ((20, self.poll_inputs), (int(1000 / self.cfg['send_rate_hz']), self.tx_tick),
                        (200, self.refresh),
-                       (2000, self.reconnect_tick)):
+                       (2000, self.reconnect_tick),
+                       (3000, self.refresh_ports)):
             t = QTimer(self)
             t.timeout.connect(fn)
             t.start(ms)
@@ -1081,16 +1097,46 @@ class MainWindow(QWidget):
 
     # ---------------- helpers ----------------
     def refresh_ports(self):
-        self.port_box.clear()
-        self.port_box.addItem(f'MASTER_HUB (UDP :{UDP_JOY_PORT})')
+        curr = self.port_box.currentText().strip() if hasattr(self, 'port_box') else ""
+        new_items = [f'MASTER_HUB (UDP :{UDP_JOY_PORT})']
         try:
-            from serial.tools import list_ports
-            for p in sorted(list_ports.comports(), key=lambda p: p.device):
-                self.port_box.addItem(p.device)
+            for p in scan_available_ports():
+                if p not in new_items:
+                    new_items.append(p)
         except Exception:
             pass
-        if self.cfg['port'] and self.cfg['port'] not in [self.port_box.itemText(i) for i in range(self.port_box.count())]:
-            self.port_box.addItem(self.cfg['port'])
+        if self.cfg.get('port') and self.cfg['port'] not in new_items:
+            new_items.append(self.cfg['port'])
+
+        current_items = [self.port_box.itemText(i) for i in range(self.port_box.count())] if hasattr(self, 'port_box') else []
+        if new_items != current_items and hasattr(self, 'port_box'):
+            self.port_box.clear()
+            for item in new_items:
+                self.port_box.addItem(item)
+            if curr:
+                idx = self.port_box.findText(curr)
+                if idx >= 0:
+                    self.port_box.setCurrentIndex(idx)
+                else:
+                    self.port_box.setEditText(curr)
+            elif self.cfg.get('port'):
+                idx = self.port_box.findText(self.cfg['port'])
+                if idx >= 0:
+                    self.port_box.setCurrentIndex(idx)
+
+        # Also sync to radio check tab r_port if present
+        if hasattr(self, 'r_port'):
+            r_curr = self.r_port.currentText().strip()
+            r_items = [p for p in new_items if not p.startswith('MASTER_HUB')]
+            r_existing = [self.r_port.itemText(i) for i in range(self.r_port.count())]
+            if r_items != r_existing:
+                self.r_port.clear()
+                for item in r_items:
+                    self.r_port.addItem(item)
+                if r_curr:
+                    idx = self.r_port.findText(r_curr)
+                    if idx >= 0:
+                        self.r_port.setCurrentIndex(idx)
 
     def on_kb(self, on):
         self.keyboard_drive = on

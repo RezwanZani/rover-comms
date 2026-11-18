@@ -22,6 +22,7 @@ import socket
 import select
 import collections
 import struct
+import json
 import serial
 import serial.tools.list_ports
 
@@ -35,6 +36,7 @@ from comms_config import (
     UDP_LISTEN_IP, MASTER_IP,
     MOTION_PACKET_ID, MOTION_PACKET_SIZE,
     ROVER_IP, ROVER_UDP_LISTEN_PORT, DUAL_REDUNDANCY_ENABLED,
+    scan_available_ports, AVAILABLE_BAUD_RATES,
 )
 
 # Target radio address
@@ -131,10 +133,65 @@ class BaseMasterHub:
             self.ser = None
             return False
 
+    def reconfigure_serial(self, new_port=None, new_baud=None):
+        """Reconfigures and reopens the serial port at runtime upon command."""
+        changed = False
+        if new_port and new_port != self.port:
+            print(f"[BaseMaster] Reconfiguring serial port: {self.port} -> {new_port}")
+            self.port = str(new_port).strip()
+            changed = True
+        if new_baud and int(new_baud) != self.baud:
+            print(f"[BaseMaster] Reconfiguring baud rate: {self.baud} -> {new_baud}")
+            self.baud = int(new_baud)
+            changed = True
+
+        if changed or not (self.ser and self.ser.is_open):
+            if self.ser and self.ser.is_open:
+                try:
+                    self.ser.close()
+                except Exception:
+                    pass
+                self.ser = None
+            self._connect_serial()
+            self._broadcast_heartbeat()
+
+    def _broadcast_heartbeat(self):
+        """Send master heartbeat containing port, baud, and link status to UDP 9003."""
+        hb = {
+            'type': 'master_heartbeat',
+            'port': self.port,
+            'baud': self.baud,
+            'connected': self.stats['serial_connected'],
+            'joy_pkts': self.stats['joy_pkts'],
+            'rtcm_chunks': self.stats['rtcm_chunks'],
+            'rx_pkts': self.stats['rx_pkts'],
+        }
+        try:
+            hb_data = b'H' + json.dumps(hb).encode('utf-8')
+            self.status_sock.sendto(hb_data, self.status_target)
+        except Exception:
+            pass
+
     def handle_joy_data(self, data: bytes):
         """Handle incoming Joystick 'M' motion packet: sends via XBee + Dual-Redundant UDP."""
         if not data or len(data) < 1:
             return
+
+        # Check for JSON control / reconfigure command (starts with b'K' or b'{')
+        if data[0:1] in (b'K', b'{'):
+            try:
+                raw_json = data[1:] if data[0:1] == b'K' else data
+                cfg = json.loads(raw_json.decode('utf-8'))
+                action = cfg.get("action", "")
+                if action in ("SET_CONFIG", "SET_PORT", "SET_BAUD"):
+                    new_port = cfg.get("port")
+                    new_baud = cfg.get("baud")
+                    self.reconfigure_serial(new_port=new_port, new_baud=new_baud)
+                    return
+            except Exception as e:
+                print(f"[BaseMaster] Error handling control packet: {e}")
+                return
+
         # Validate that it starts with 'M' or 'C'
         if data[0:1] in (b'M', b'C'):
             self.stats['joy_pkts'] += 1
@@ -298,20 +355,7 @@ class BaseMasterHub:
                 # 5. Master Heartbeat Forwarder (every 1.0s)
                 if now - last_heartbeat_time > 1.0:
                     last_heartbeat_time = now
-                    hb = {
-                        'type': 'master_heartbeat',
-                        'port': self.port,
-                        'connected': self.stats['serial_connected'],
-                        'joy_pkts': self.stats['joy_pkts'],
-                        'rtcm_chunks': self.stats['rtcm_chunks'],
-                        'rx_pkts': self.stats['rx_pkts'],
-                    }
-                    try:
-                        import json
-                        hb_data = b'H' + json.dumps(hb).encode('utf-8')
-                        self.status_sock.sendto(hb_data, self.status_target)
-                    except Exception:
-                        pass
+                    self._broadcast_heartbeat()
 
             except KeyboardInterrupt:
                 print("\n[BaseMaster] Shutting down.")

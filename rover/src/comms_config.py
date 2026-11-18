@@ -41,8 +41,71 @@ GPS_PORT                = '/dev/rover_rtk'
 # XBee API mode baud rate — must match radio firmware BD parameter (BD=7 → 115200)
 XBEE_BAUD_RATE          = 115200
 
+# Supported standard baud rates for selection in GUIs
+AVAILABLE_BAUD_RATES    = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600]
+
 # LC29H GPS serial baud rate
 GPS_BAUD_RATE           = 115200
+
+def scan_available_ports():
+    """
+    Scans physical, virtual, and symlinked serial ports across Linux and Windows.
+    Guarantees virtual pairs (/tmp/ttyV0, /tmp/ttyV1, /tmp/tty*), USB adapters,
+    and configured ports appear at the top of the list.
+    """
+    import glob, os, sys
+    ports = []
+
+    def _add(p):
+        if p and p not in ports:
+            ports.append(p)
+
+    # 1. Virtual ports in /tmp (socat virtual pairs, pty links)
+    for pattern in ['/tmp/ttyV*', '/tmp/ttyXBee*', '/tmp/tty*']:
+        for vport in sorted(glob.glob(pattern)):
+            if os.path.exists(vport):
+                _add(vport)
+
+    # Explicit virtual pair fallback
+    for vport in ['/tmp/ttyV0', '/tmp/ttyV1']:
+        if os.path.exists(vport):
+            _add(vport)
+
+    # 2. Linux USB & ACM serial devices + udev symlinks
+    if sys.platform != 'win32':
+        for pattern in ['/dev/ttyUSB*', '/dev/ttyACM*', '/dev/rover_*', '/dev/serial/by-id/*', '/dev/serial/by-path/*']:
+            for dev in sorted(glob.glob(pattern)):
+                if os.path.exists(dev):
+                    _add(dev)
+
+    # 3. Pyserial standard detection (hardware COM ports & USB-to-UART)
+    try:
+        import serial.tools.list_ports
+        for p in serial.tools.list_ports.comports():
+            dev = p.device
+            # Filter out Linux /dev/ttyS0..31 inactive phantom ports
+            if sys.platform != 'win32' and dev.startswith('/dev/ttyS'):
+                continue
+            _add(dev)
+    except Exception:
+        pass
+
+    # 4. Windows registry extra scan
+    if sys.platform == 'win32':
+        try:
+            import winreg
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DEVICEMAP\SERIALCOMM")
+            for i in range(256):
+                try:
+                    val = winreg.EnumValue(key, i)
+                    _add(str(val[1]))
+                except OSError:
+                    break
+            winreg.CloseKey(key)
+        except Exception:
+            pass
+
+    return ports
 
 # -----------------------------------------------------------------------------
 # XBEE RADIO 64-BIT ADDRESSES
