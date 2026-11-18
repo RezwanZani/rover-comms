@@ -62,12 +62,13 @@ base_station/
   - Receives incoming frames from XBee (`'T'` telemetry, `'A'` ACKs) and forwards them to `UDP 9003`.
 
 ### 2. `launch_base_station.py` (Supervisor Launcher)
-- Python supervisor that launches all base station components in the correct sequence with proper delays:
-  1. `base_master.py` (Router Hub & radio owner)
-  2. `rover-gui/backend/main.py` (WebSocket server on port 8765)
-  3. `rover-gui/frontend` (`pnpm dev` on port 5173)
-  4. `xbee_teleop_windows.py` (Gamepad teleop GUI + Science Actuator panel with Ctrl+1..6, Ctrl+Arrows, and Ctrl+Z)
-  5. `base_station_windows.py` (Optional RTK GPS survey-in with `--gps`)
+- Python supervisor that compiles the frontend and launches all base station components sequentially:
+  1. Compiles React frontend via `pnpm build -> dist/`
+  2. Starts `base_master.py` (Router Hub & sole XBee radio owner)
+  3. Starts `rover-gui/backend/main.py` (WebSocket server on port 8765)
+  4. Starts prebuilt preview server via `pnpm preview` on port 5173 and automatically launches web browser
+  5. Starts `xbee_teleop_windows.py` (Gamepad teleop GUI + Science Actuator panel with Ctrl+1..6, Ctrl+Arrows, and Ctrl+Z)
+  6. Starts `base_station_windows.py` (Optional RTK GPS survey-in with `--gps`)
 - Features unified process management, graceful Ctrl+C group cleanup, and independent log routing.
 
 ### 3. `rover-gui` (Dashboard Frontend & Backend)
@@ -92,7 +93,7 @@ ROVER_IP = '192.168.1.100'
 MASTER_IP = '127.0.0.1'
 
 # Serial port for Base Station XBee radio:
-TELEOP_XBEE_PORT = 'COM3'   # On Windows (or /dev/ttyUSB0 on Linux)
+TELEOP_XBEE_PORT = '/dev/ttyUSB0' if sys.platform != 'win32' else 'COM3'
 XBEE_BAUD_RATE   = 115200
 ```
 

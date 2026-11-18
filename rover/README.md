@@ -87,6 +87,7 @@ rover/
 
 ### 2. `xbee_teleop/science_node` (Arduino Mega Bridge)
 - Connects to Arduino Mega 2560 via USB serial (`/dev/ttyACM0` or `/dev/arduino_science`) at `9600 baud`.
+- Dedicated Science Team setup, pinout, and wiring guide: **[`arduino/README.md`](file:///home/rezwan/Desktop/rover_com/arduino/README.md)**.
 - Subscribes to `/science/actuator_cmd` (`UInt8MultiArray`).
 - Sends formatted serial commands: `S:m1,m2,m3,m4,m5,led,servo\n`.
 - Parses feedback lines: `STATUS:m1=1,m2=0,m3=1,m4=0,m5=0,led=1,servo=90\n` and publishes JSON to `/science/actuator_status` (`std_msgs/String`).

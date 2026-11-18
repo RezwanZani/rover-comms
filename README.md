@@ -250,6 +250,7 @@ Open your browser to: **`http://localhost:5173`**
 
 ### Science Mission Subsystem (Pumps, LED, Servo)
 Access via the **"🔬 SCIENCE"** button in the web Topbar or navigate to **`/science`**:
+- **Setup & Wiring Guide**: Complete guide for the Science Team available at **[`arduino/README.md`](file:///home/rezwan/Desktop/rover_com/arduino/README.md)**.
 - **3-Column Layout**:
   - **Left (20%)**: All 5 Camera streams (thumbnails & channel selector).
   - **Middle (54%)**: Selected camera in high-res full view.
