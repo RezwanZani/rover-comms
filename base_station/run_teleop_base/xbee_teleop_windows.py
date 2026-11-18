@@ -82,6 +82,9 @@ AXIS_DPAD_Y = 7            # D-Pad Y synthetic axis for gripper
 MASTER_IP = '127.0.0.1'
 UDP_JOY_PORT = 9001
 UDP_STATUS_PORT = 9003
+ROVER_IP = '127.0.0.1'
+SCIENCE_UDP_PORT = 8889
+ROVER_UDP_PORT = 8888
 
 # Science & Mode Packet Protocol
 SCIENCE_PACKET_FORMAT = '<cBBBBBBBB'
@@ -148,6 +151,11 @@ CONFIG = dict(
     axis_angular=AXIS_ANGULAR,         # arcade: right stick X -> wz
     axis_left=AXIS_LEFT,               # tank:   left stick Y
     axis_right=AXIS_RIGHT,             # tank:   right stick Y
+
+    # ---- Network targets for Science & Teleop UDP ----
+    rover_ip=ROVER_IP,
+    science_udp_port=SCIENCE_UDP_PORT,
+    rover_udp_port=ROVER_UDP_PORT,
 
     # ---- Arm buttons (Xbox pad button numbers) ----
     # buttons  0=A  1=B  2=X  3=Y  4=LB  5=RB  6=Back  7=Start  8=LS  9=RS
@@ -1111,6 +1119,27 @@ class SciencePanel(QGroupBox):
         h_box.addStretch(1)
         main_lay.addLayout(h_box)
 
+        # Target Rover UDP IP:Port for Science commands
+        net_box = QHBoxLayout()
+        net_box.setSpacing(4)
+        lbl_target = QLabel('Rover UDP:')
+        lbl_target.setStyleSheet('font-size: 10px; color: #bdc3c7;')
+        self.edit_ip = QLineEdit(ROVER_IP)
+        self.edit_ip.setFixedWidth(90)
+        self.edit_ip.setFixedHeight(20)
+        self.edit_ip.setStyleSheet('font-size: 10px; padding: 1px;')
+        lbl_col = QLabel(':')
+        self.edit_port = QLineEdit(str(SCIENCE_UDP_PORT))
+        self.edit_port.setFixedWidth(45)
+        self.edit_port.setFixedHeight(20)
+        self.edit_port.setStyleSheet('font-size: 10px; padding: 1px;')
+        net_box.addWidget(lbl_target)
+        net_box.addWidget(self.edit_ip)
+        net_box.addWidget(lbl_col)
+        net_box.addWidget(self.edit_port)
+        net_box.addStretch(1)
+        main_lay.addLayout(net_box)
+
         # Actuators form/grid layout
         form = QGridLayout()
         form.setHorizontalSpacing(8)
@@ -1606,16 +1635,34 @@ class MainWindow(QWidget):
         if self.link and self.link.connected:
             sent = self.link.send(pkt)
 
-        # Fallback / Dual broadcast to local Master Hub (UDP 9001)
-        if not (self.link and isinstance(self.link, UdpLink)):
+        # Send over UDP network directly to Rover Science receiver (port 8889) and dual teleop (port 8888)
+        target_ip = self.cfg.get('rover_ip', '127.0.0.1')
+        sci_port = int(self.cfg.get('science_udp_port', 8889))
+        rover_port = int(self.cfg.get('rover_udp_port', 8888))
+        if hasattr(self, 'sci_p') and hasattr(self.sci_p, 'edit_ip'):
             try:
-                import socket
-                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                s.sendto(pkt, (MASTER_IP, UDP_JOY_PORT))
-                s.close()
-                sent = True
+                target_ip = self.sci_p.edit_ip.text().strip() or target_ip
+                sci_port = int(self.sci_p.edit_port.text().strip())
             except Exception:
                 pass
+
+        ascii_pkt = f"S:{m1},{m2},{m3},{m4},{m5},{led},{servo}\n".encode('ascii')
+
+        try:
+            import socket
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            # Send both ASCII string (compatible with socat) and binary struct to target science receiver
+            s.sendto(ascii_pkt, (target_ip, sci_port))
+            s.sendto(pkt, (target_ip, sci_port))
+            # Also send binary to rover main dual-redundant port if different
+            if rover_port != sci_port:
+                s.sendto(pkt, (target_ip, rover_port))
+            # Also send to local Base Master hub
+            s.sendto(pkt, (MASTER_IP, UDP_JOY_PORT))
+            s.close()
+            sent = True
+        except Exception:
+            pass
 
         return sent
 
