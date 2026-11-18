@@ -123,6 +123,13 @@ class RxNode(Node):
         self.arm_pub   = self.create_publisher(Float32MultiArray, p('arm_vel_topic'), 10)
         self.status_pub = self.create_publisher(String, 'xbee_rx/status', 10)
 
+        # Science Mission Actuator Publisher & Rover Mode Publisher
+        self.science_pub = self.create_publisher(UInt8MultiArray, '/science/actuator_cmd', 10)
+        self.mode_pub    = self.create_publisher(String, '/rover/mode', 10)
+        self.current_mode = "TELEOP"
+        self.last_science_seq = None
+        self.last_mode_seq = None
+
         # GPS RTCM Injection Publisher
         if RTCMMessage:
             self.rtcm_pub = self.create_publisher(RTCMMessage, '/rtcm', 10)
@@ -283,6 +290,22 @@ class RxNode(Node):
                 self.seq = seq
                 self.vx, self.wz = vx, wz
 
+            elif m[0] == 'science':
+                _, seq, m1, m2, m3, m4, m5, led, servo = m
+                msg = UInt8MultiArray()
+                msg.data = [int(m1), int(m2), int(m3), int(m4), int(m5), int(led), int(servo)]
+                self.science_pub.publish(msg)
+                self.get_logger().info(
+                    f"🔬 [SCIENCE CMD via {source}] M1:{m1} M2:{m2} M3:{m3} M4:{m4} M5:{m5} LED:{led} SERVO:{servo}°"
+                )
+
+            elif m[0] == 'mode':
+                _, seq, mode_val = m
+                mode_str = "AUTONOMOUS" if int(mode_val) == 1 else "TELEOP"
+                self.current_mode = mode_str
+                self.mode_pub.publish(String(data=mode_str))
+                self.get_logger().info(f"⚙️ [ROVER MODE via {source}] Switched to {mode_str}")
+
     def _handle_rtcm(self, data: bytes, source: str = 'XBEE'):
         """Publish incoming RTCM3 binary bytes to /rtcm topic for gps_node with deduplication."""
         if hasattr(self, 'rtcm_pub') and self.rtcm_pub:
@@ -399,6 +422,7 @@ class RxNode(Node):
                 seq=self.seq,
                 # Dual-Redundancy & Failover
                 active_source=self.active_source,
+                mode=self.current_mode,
                 xbee_alive=(self.last_xbee_rx is not None and (now - self.last_xbee_rx < self.xbee_failover_timeout)),
                 udp_alive=(self.last_udp_rx is not None and (now - self.last_udp_rx < self.xbee_failover_timeout)),
                 stale_rejected=self.stale_rejected,

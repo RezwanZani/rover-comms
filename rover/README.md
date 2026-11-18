@@ -1,6 +1,6 @@
 # Rover Onboard Subsystem (ROS 2 Jazzy)
 
-The Rover Onboard subsystem runs on the rover's single-board computer (e.g. Raspberry Pi 5, Jetson Orin Nano, or x86 SBC running Ubuntu 24.04 with ROS 2 Jazzy).
+The Rover Onboard subsystem runs on the rover's single-board computer (e.g. NVIDIA Jetson Orin NX/Nano, Raspberry Pi 5, or x86 SBC running Ubuntu with ROS 2 Jazzy or Humble).
 
 ---
 
@@ -11,22 +11,28 @@ The Rover Onboard subsystem runs on the rover's single-board computer (e.g. Rasp
                       │    [Primary Authority]
                       ▼
             [ ROVER COMMS MASTER ] (xbee_teleop/rx_node)
-            - Dual Receiver (Serial RF + UDP 8888)
+            - Dual Receiver (Serial RF + Wi-Fi UDP 8888)
             - XBee Priority & 0.35s Failover Engine
             - RFC 1982 Stale & Duplicate Rejection
             - RTCM Frame Deduplication
             - 0.5s Deadman Safety Watchdog
                       │
-                      ├──► /cmd_vel  (geometry_msgs/Twist) ──► Motor Controllers
-                      ├──► /arm_vel  (std_msgs/Float32MultiArray) ──► Arm Actuators
-                      └──► /rtcm     (rtcm_msgs/Message) ──► Quectel LC29H RTK GPS
-                                                                    │
-                                                                    ▼ /gps (NavSatFix)
-                                                          [ telemetry_node ]
-                                                                    │
-                                         ┌──────────────────────────┴──────────────────────────┐
-                                         ▼                                                     ▼
-                             /telemetry_tx ──► XBee Downlink                        Wi-Fi UDP :9003 Downlink
+                      ├──► /cmd_vel  (geometry_msgs/Twist) ────────► Motor Kinematics Driver
+                      ├──► /arm_vel  (std_msgs/Float32MultiArray) ─► Robotic Arm Actuators
+                      ├──► /rover/mode (std_msgs/String) ──────────► Autonomy / Nav2 Stack
+                      ├──► /science/actuator_cmd (UInt8MultiArray) ─► [ science_node ]
+                      │                                                     │ Serial S:.. / STATUS:..
+                      │                                                     ▼
+                      │                                             [ Arduino Mega 2560 ]
+                      │                                             (5 Pumps, LED, Servo)
+                      └──► /rtcm (rtcm_msgs/Message) ──────────────► [ rover_gps_node ]
+                                                                            │
+                                                                            ▼ /gps (NavSatFix)
+                                                                  [ telemetry_node ]
+                                                                            │
+                                                 ┌──────────────────────────┴──────────────────────────┐
+                                                 ▼                                                     ▼
+                                     /telemetry_tx ──► XBee Downlink                        Wi-Fi UDP :9003 Downlink
 ```
 
 ---
@@ -35,64 +41,79 @@ The Rover Onboard subsystem runs on the rover's single-board computer (e.g. Rasp
 
 ```
 rover/
-├── src/
-│   ├── comms_config.py            ← Single Source of Truth for onboard parameters
-│   ├── xbee_teleop_rover/         ← Rover Comms Master package
-│   │   └── xbee_teleop/
-│   │       ├── rx_node.py         ← Main node: Dual Receiver, Priority Engine, Watchdog
-│   │       ├── link.py            ← Non-blocking XBee API Mode 1 framing & unpacking
-│   │       ├── tx_node.py         ← (Optional) Transmitter for rover-to-rover teleop
-│   │       └── gui.py             ← Local status window
-│   ├── rover-gps/                 ← Quectel LC29H RTK GPS driver
-│   │   └── src/gps_data/gps_data/
-│   │       ├── gps_node.py        ← GPS NMEA parser & /rtcm correction injector
-│   │       └── rtk_bridge_node.py ← (Optional) Dedicated RTCM serial bridge
-│   └── rover_telemetry/           ← Telemetry aggregator package
-│       └── rover_telemetry/
-│           └── telemetry_node.py  ← Gathers sensors & broadcasts JSON via XBee + UDP
-└── setup_udev.sh                  ← Udev rules script for stable serial symlinks
+├── setup_udev.sh                  ← Udev rules script for stable serial symlinks
+└── src/
+    ├── comms_config.py            ← Single Source of Truth for onboard parameters
+    │
+    ├── xbee_teleop_rover/         ← Rover Comms Master package (xbee_teleop)
+    │   ├── launch/
+    │   │   ├── rover_all.launch.py← MASTER LAUNCHER (Runs all onboard nodes)
+    │   │   └── rx.launch.py       ← Dedicated receiver launcher
+    │   └── xbee_teleop/
+    │       ├── rx_node.py         ← Comms Master: Dual Receiver, Priority & Failover
+    │       ├── science_node.py    ← Arduino Mega 2560 Serial Bridge
+    │       └── link.py            ← Binary packet codecs ('M', 'N', 'S', 'A')
+    │
+    ├── rover-gps/                 ← Quectel LC29H RTK GPS driver (gps_data)
+    │   └── src/gps_data/
+    │       ├── launch/gps.launch.py
+    │       └── gps_data/gps_node.py ← GPS NMEA parser & RTCM injection
+    │
+    └── rover_telemetry/           ← Telemetry broadcaster (rover_telemetry)
+        ├── launch/telemetry.launch.py
+        └── rover_telemetry/
+            └── telemetry_node.py  ← Aggregates sensors & broadcasts over XBee + UDP
 ```
 
 ---
 
-## Key Nodes & Responsibilities
+## Key Onboard Nodes
 
-### 1. `xbee_teleop/rx_node.py` (Rover Comms Master)
-- **Sole Radio Owner**: Binds physical XBee serial port (`/dev/rover_900mhz`).
+### 1. `xbee_teleop/rx_node` (Comms Master)
+- **Sole Radio Owner**: Binds physical XBee serial port (`/dev/rover_900mhz` or `/dev/ttyUSB0`) at `115200 baud`.
 - **UDP Listener**: Background socket thread listening on `0.0.0.0:8888`.
 - **Priority Failover**:
   - Treats XBee RF as primary.
-  - If XBee is silent for $>0.35$s, switches seamlessly to UDP.
+  - If XBee is silent for $>0.35$s, switches seamlessly to Wi-Fi UDP.
   - When XBee packets resume, XBee immediately takes back primary control.
 - **Latency Protection**: RFC 1982 circular sequence math `(seq - last_seq) & 0xFF` rejects stale out-of-order packets ($\Delta \ge 128$) and duplicate packets ($\Delta == 0$).
 - **Demultiplexing**:
-  - Drives motors on `/cmd_vel` at 20 Hz.
-  - Drives arm actuators on `/arm_vel` at 20 Hz.
+  - Publishes drive velocities to `/cmd_vel` (`geometry_msgs/Twist`) at 20 Hz.
+  - Publishes arm velocities to `/arm_vel` (`std_msgs/Float32MultiArray`) at 20 Hz.
+  - Publishes operating mode to `/rover/mode` (`std_msgs/String`).
+  - Publishes science commands to `/science/actuator_cmd` (`std_msgs/UInt8MultiArray`).
   - Injects deduplicated RTCM3 frames to `/rtcm`.
 - **Deadman Safety Watchdog**: If no packet arrives on either link for 0.5s, zeroes all drive and arm velocities.
 
-### 2. `gps_data/gps_node.py` (Quectel LC29H RTK Driver)
+### 2. `xbee_teleop/science_node` (Arduino Mega Bridge)
+- Connects to Arduino Mega 2560 via USB serial (`/dev/ttyACM0` or `/dev/arduino_science`) at `9600 baud`.
+- Subscribes to `/science/actuator_cmd` (`UInt8MultiArray`).
+- Sends formatted serial commands: `S:m1,m2,m3,m4,m5,led,servo\n`.
+- Parses feedback lines: `STATUS:m1=1,m2=0,m3=1,m4=0,m5=0,led=1,servo=90\n` and publishes JSON to `/science/actuator_status` (`std_msgs/String`).
+
+### 3. `rover_telemetry/telemetry_node` (Telemetry Aggregator)
+- Collects GPS position, RTK fix quality, battery voltage, IMU data, motor states, science actuator states, and operational mode at 5 Hz.
+- Packages data into structured JSON and broadcasts simultaneously over:
+  - Wi-Fi UDP port `9003` to Base Station.
+  - XBee radio downlink via topic `/telemetry_tx` (routed through `rx_node`).
+
+### 4. `gps_data/gps_node` (Quectel LC29H RTK Driver)
 - Connects to `/dev/rover_rtk` at 115200 baud.
 - Subscribes to `/rtcm` and writes binary correction bytes into the LC29H serial stream.
 - Reads NMEA sentences (`$GNGGA`, `$GNRMC`) and publishes `sensor_msgs/NavSatFix` on `/gps`.
-
-### 3. `rover_telemetry/telemetry_node.py` (Telemetry Aggregator)
-- Collects GPS position, RTK fix quality, battery voltage, IMU data, and telecom link status at 5 Hz.
-- Packages data into structured JSON and broadcasts simultaneously over:
-  - Wi-Fi UDP port `9003` to Base Station.
-  - XBee radio downlink via topic `/telemetry_tx`.
 
 ---
 
 ## Hardware Udev Symlinks
 
-To ensure USB ports never swap after reboot, run:
+To ensure USB ports never swap upon reboot or replug, install the provided udev rules:
 ```bash
 cd rover && sudo ./setup_udev.sh
 ```
-This creates stable symlinks:
+This generates persistent symlinks:
 - `/dev/rover_900mhz` $\rightarrow$ FTDI USB UART (XBee radio)
 - `/dev/rover_rtk` $\rightarrow$ Quectel LC29H RTK GPS module
+- `/dev/ttyACM0` $\rightarrow$ Arduino Mega 2560
 
 ---
 
@@ -103,25 +124,25 @@ This creates stable symlinks:
 source /opt/ros/jazzy/setup.bash
 cd /home/rezwan/Desktop/rover_com/rover
 colcon build --symlink-install
-```
-
-### 2. Launching Onboard Nodes
-Source the built workspace:
-```bash
 source install/setup.bash
 ```
 
-#### Launch Comms Master:
+### 2. Launch All Nodes Simultaneously (Single Command)
+From project root:
 ```bash
-ros2 run xbee_teleop rx_node
+./run_rover_all.sh
 ```
 
-#### Launch RTK GPS Node:
+Or using native ROS 2 launch:
 ```bash
-ros2 run gps_data gps_node
+ros2 launch xbee_teleop rover_all.launch.py
 ```
 
-#### Launch Telemetry Node:
+#### Supported Arguments:
 ```bash
-ros2 run rover_telemetry telemetry_node
+# Override ports and Base Station IP:
+./run_rover_all.sh xbee_port:=/dev/ttyUSB0 arduino_port:=/dev/ttyACM0 base_ip:=192.168.1.50
+
+# Disable GPS if running indoors on a test bench:
+./run_rover_all.sh enable_gps:=false
 ```

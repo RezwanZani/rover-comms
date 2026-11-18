@@ -192,13 +192,15 @@ class BaseMasterHub:
                 print(f"[BaseMaster] Error handling control packet: {e}")
                 return
 
-        # Validate that it starts with 'M' or 'C'
-        if data[0:1] in (b'M', b'C'):
+        # Validate that it starts with 'M', 'C', 'S' (Science), or 'N' (Mode)
+        if data[0:1] in (b'M', b'C', b'S', b'N'):
             self.stats['joy_pkts'] += 1
             self.stats['last_joy_time'] = time.monotonic()
             
             # 1. Primary XBee RF queue (preempts RTCM)
-            self.joy_queue.clear()
+            if data[0:1] in (b'M', b'C'):
+                # Retain any queued critical command packets (S, N) but replace old motion
+                self.joy_queue = collections.deque([p for p in self.joy_queue if p[0:1] in (b'S', b'N')])
             self.joy_queue.append(data)
 
             # 2. Dual-Redundant Wi-Fi UDP transmission (simultaneous)
@@ -209,7 +211,7 @@ class BaseMasterHub:
                 except Exception:
                     pass
 
-            # 3. Forward teleop packet to local GUI backend (UDP 9003)
+            # 3. Forward teleop/command packet to local GUI backend (UDP 9003)
             try:
                 self.status_sock.sendto(data, self.status_target)
             except Exception:

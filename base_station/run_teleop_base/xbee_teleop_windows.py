@@ -27,6 +27,7 @@ Packet format: 'M', seq u8, vx i16, wz i16, act1 i16, act2 i16, act3 i16, wrist 
 Run:  pip install pygame PyQt5 digi-xbee pyserial   then   python xbee_teleop_windows.py
 """
 import ctypes
+import json
 import os
 import sys
 import struct
@@ -49,8 +50,9 @@ from comms_config import (
     AXIS_LINEAR, AXIS_ANGULAR, AXIS_LEFT, AXIS_RIGHT,
     BTN_ACT1, BTN_ACT2, BTN_ACT3, BTN_WRIST,
     AXIS_LT, AXIS_RT, TRIGGER_THRESHOLD, AXIS_DPAD_Y,
-    UDP_JOY_PORT, MASTER_IP,
+    UDP_JOY_PORT, UDP_STATUS_PORT, MASTER_IP,
     scan_available_ports, AVAILABLE_BAUD_RATES,
+    SCIENCE_PACKET_FORMAT, SCIENCE_PACKET_ID, SCIENCE_PACKET_SIZE,
 )
 
 CONFIG = dict(
@@ -111,6 +113,12 @@ _MOTION = struct.Struct('<cBhhhhhhh')
 # ACK from rover: 'A' seq lost  (5 bytes)
 _ACK = struct.Struct('<cBH')
 
+# Science actuator packet: 'S' seq m1 m2 m3 m4 m5 led servo  (9 bytes)
+_SCIENCE = struct.Struct('<cBBBBBBBB')
+
+# Operational mode packet: 'N' seq mode  (3 bytes: 0=TELEOP, 1=AUTONOMOUS)
+_MODE = struct.Struct('<cBB')
+
 
 def _i16(v):
     """Scale float by 1000 and clamp to signed 16-bit integer."""
@@ -132,13 +140,29 @@ def pack_cmd(seq, vx, wz):
     return _CMD.pack(b'C', seq & 0xFF, _i16(vx), _i16(wz))
 
 
+def pack_science(seq, m1, m2, m3, m4, m5, led, servo):
+    """Pack Science actuator command packet ('S', 9 bytes)."""
+    return _SCIENCE.pack(
+        b'S', seq & 0xFF,
+        int(bool(m1)), int(bool(m2)), int(bool(m3)), int(bool(m4)), int(bool(m5)),
+        int(bool(led)), max(0, min(180, int(servo)))
+    )
+
+
+def pack_mode(seq, mode):
+    """Pack Rover operational mode packet ('N', 3 bytes)."""
+    return _MODE.pack(b'N', seq & 0xFF, int(mode) & 0xFF)
+
+
 def unpack(data):
     """Decode an incoming XBee packet.
 
     Returns one of:
-      ('motion', seq, vx, wz, act1, act2, act3, wrist, gripper)
-      ('cmd',    seq, vx, wz)   -- legacy, backward compat
-      ('ack',    seq, lost)     -- rover ACK
+      ('motion',  seq, vx, wz, act1, act2, act3, wrist, gripper)
+      ('cmd',     seq, vx, wz)   -- legacy, backward compat
+      ('science', seq, m1, m2, m3, m4, m5, led, servo)
+      ('mode',    seq, mode)
+      ('ack',     seq, lost)     -- rover ACK
       None
     """
     data = bytes(data)
@@ -151,6 +175,12 @@ def unpack(data):
     if data[:1] == b'C' and len(data) == _CMD.size:
         _, seq, vx, wz = _CMD.unpack(data)
         return ('cmd', seq, vx / 1000.0, wz / 1000.0)
+    if data[:1] == b'S' and len(data) == _SCIENCE.size:
+        _, seq, m1, m2, m3, m4, m5, led, servo = _SCIENCE.unpack(data)
+        return ('science', seq, m1, m2, m3, m4, m5, led, servo)
+    if data[:1] == b'N' and len(data) == _MODE.size:
+        _, seq, mode = _MODE.unpack(data)
+        return ('mode', seq, mode)
     if data[:1] == b'A' and len(data) == _ACK.size:
         _, seq, lost = _ACK.unpack(data)
         return ('ack', seq, lost)
@@ -601,6 +631,55 @@ class UdpLink:
             self.sock = None
 
 
+class UdpTelemetryReceiver:
+    """Background receiver for Rover Telemetry ('T' or JSON) and ACKs ('A') on UDP port 9003."""
+    def __init__(self, port, callback):
+        self.port = int(port)
+        self.callback = callback
+        self.running = False
+        self.thread = None
+        self.sock = None
+
+    def start(self):
+        if self.running:
+            return
+        try:
+            import socket
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            if hasattr(socket, 'SO_REUSEPORT'):
+                try:
+                    self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+                except Exception:
+                    pass
+            self.sock.bind(('0.0.0.0', self.port))
+            self.sock.settimeout(0.5)
+            self.running = True
+            self.thread = threading.Thread(target=self._run, daemon=True)
+            self.thread.start()
+        except Exception:
+            self.sock = None
+            self.running = False
+
+    def _run(self):
+        while self.running and self.sock:
+            try:
+                data, _ = self.sock.recvfrom(4096)
+                if data and self.callback:
+                    self.callback(data)
+            except Exception:
+                continue
+
+    def stop(self):
+        self.running = False
+        sock, self.sock = self.sock, None
+        if sock:
+            try:
+                sock.close()
+            except Exception:
+                pass
+
+
 
 # ==========================================================================
 # 3. Radio check / fix / send
@@ -932,6 +1011,194 @@ class Panel(QGroupBox):
                 self.v[k].setText(str(t))
 
 
+class SciencePanel(QGroupBox):
+    def __init__(self, on_toggle_motor, on_toggle_led, on_step_servo, on_stop_all):
+        super().__init__('Science Actuators (Ctrl+1..6, Ctrl+Arrows)')
+        self.on_toggle_motor = on_toggle_motor
+        self.on_toggle_led = on_toggle_led
+        self.on_step_servo = on_step_servo
+        self.on_stop_all = on_stop_all
+
+        main_lay = QVBoxLayout(self)
+        main_lay.setContentsMargins(8, 8, 8, 8)
+        main_lay.setSpacing(4)
+
+        # Header status (LED dot + status text)
+        h_box = QHBoxLayout()
+        self.led = QLabel()
+        self.led.setFixedSize(14, 14)
+        self.head = QLabel('Waiting for Science telemetry...')
+        self.head.setStyleSheet('font-weight: bold; font-size: 11px;')
+        h_box.addWidget(self.led)
+        h_box.addWidget(self.head)
+        h_box.addStretch(1)
+        main_lay.addLayout(h_box)
+
+        # Actuators form/grid layout
+        form = QGridLayout()
+        form.setHorizontalSpacing(8)
+        form.setVerticalSpacing(3)
+
+        self.motor_labels = {}
+        self.motor_btns = {}
+
+        # 5 Motors
+        motor_names = [
+            (1, 'Motor 1 (Sample 1) [Ctrl+1]'),
+            (2, 'Motor 2 (Sample 2) [Ctrl+2]'),
+            (3, 'Motor 3 (Reagent 1) [Ctrl+3]'),
+            (4, 'Motor 4 (Reagent 2) [Ctrl+4]'),
+            (5, 'Motor 5 (Flush)    [Ctrl+5]'),
+        ]
+        for row, (idx, name) in enumerate(motor_names):
+            lbl_title = QLabel(name + ':')
+            lbl_title.setStyleSheet('font-size: 11px;')
+
+            lbl_status = QLabel('OFF')
+            lbl_status.setAlignment(Qt.AlignCenter)
+            lbl_status.setFixedWidth(55)
+            lbl_status.setStyleSheet(
+                'background: #34495e; color: #bdc3c7; font-weight: bold; '
+                'border-radius: 3px; padding: 2px 4px; font-size: 10px;'
+            )
+            self.motor_labels[f'm{idx}'] = lbl_status
+
+            btn = QPushButton('Toggle')
+            btn.setFocusPolicy(Qt.NoFocus)
+            btn.setFixedHeight(22)
+            btn.setStyleSheet('font-size: 10px; padding: 1px 6px;')
+            btn.clicked.connect(lambda _, i=idx: self.on_toggle_motor(i))
+            self.motor_btns[f'm{idx}'] = btn
+
+            form.addWidget(lbl_title, row, 0)
+            form.addWidget(lbl_status, row, 1)
+            form.addWidget(btn, row, 2)
+
+        # LED
+        row = len(motor_names)
+        lbl_led_title = QLabel('Illumination LED [Ctrl+6]:')
+        lbl_led_title.setStyleSheet('font-size: 11px;')
+        self.lbl_led_status = QLabel('OFF')
+        self.lbl_led_status.setAlignment(Qt.AlignCenter)
+        self.lbl_led_status.setFixedWidth(55)
+        self.lbl_led_status.setStyleSheet(
+            'background: #34495e; color: #bdc3c7; font-weight: bold; '
+            'border-radius: 3px; padding: 2px 4px; font-size: 10px;'
+        )
+        self.btn_led = QPushButton('Toggle')
+        self.btn_led.setFocusPolicy(Qt.NoFocus)
+        self.btn_led.setFixedHeight(22)
+        self.btn_led.setStyleSheet('font-size: 10px; padding: 1px 6px;')
+        self.btn_led.clicked.connect(self.on_toggle_led)
+
+        form.addWidget(lbl_led_title, row, 0)
+        form.addWidget(self.lbl_led_status, row, 1)
+        form.addWidget(self.btn_led, row, 2)
+
+        # Servo
+        row += 1
+        lbl_servo_title = QLabel('Carousel Servo [Ctrl+←/→]:')
+        lbl_servo_title.setStyleSheet('font-size: 11px;')
+        self.lbl_servo_status = QLabel('0°')
+        self.lbl_servo_status.setAlignment(Qt.AlignCenter)
+        self.lbl_servo_status.setFixedWidth(55)
+        self.lbl_servo_status.setStyleSheet(
+            'background: #2c3e50; color: #3498db; font-weight: bold; '
+            'border-radius: 3px; padding: 2px 4px; font-size: 11px;'
+        )
+        s_btn_box = QHBoxLayout()
+        s_btn_box.setSpacing(4)
+        self.btn_servo_dec = QPushButton('◄ -15°')
+        self.btn_servo_dec.setFocusPolicy(Qt.NoFocus)
+        self.btn_servo_dec.setFixedHeight(22)
+        self.btn_servo_dec.setStyleSheet('font-size: 10px; padding: 1px 4px;')
+        self.btn_servo_dec.clicked.connect(lambda: self.on_step_servo(-15))
+
+        self.btn_servo_inc = QPushButton('+15° ►')
+        self.btn_servo_inc.setFocusPolicy(Qt.NoFocus)
+        self.btn_servo_inc.setFixedHeight(22)
+        self.btn_servo_inc.setStyleSheet('font-size: 10px; padding: 1px 4px;')
+        self.btn_servo_inc.clicked.connect(lambda: self.on_step_servo(15))
+
+        s_btn_box.addWidget(self.btn_servo_dec)
+        s_btn_box.addWidget(self.btn_servo_inc)
+
+        form.addWidget(lbl_servo_title, row, 0)
+        form.addWidget(self.lbl_servo_status, row, 1)
+        form.addLayout(s_btn_box, row, 2)
+
+        main_lay.addLayout(form)
+
+        # Bottom Safety / All Stop button
+        self.btn_stop_all = QPushButton('⏹ STOP ALL MOTORS (z)')
+        self.btn_stop_all.setFocusPolicy(Qt.NoFocus)
+        self.btn_stop_all.setFixedHeight(24)
+        self.btn_stop_all.setStyleSheet(
+            'background: #c0392b; color: white; font-weight: bold; '
+            'border-radius: 3px; font-size: 10px; margin-top: 2px;'
+        )
+        self.btn_stop_all.clicked.connect(self.on_stop_all)
+        main_lay.addWidget(self.btn_stop_all)
+
+        self.state(GREY, 'No Science Telemetry')
+
+    def state(self, color, text):
+        self.led.setStyleSheet(f'background:{color}; border-radius:7px; border:1px solid #222;')
+        self.head.setText(text)
+
+    def update_display(self, state):
+        """Update widgets strictly from confirmed rover telemetry state."""
+        now = time.monotonic()
+        age = now - state.get('last_update', 0.0)
+        is_fresh = age < 3.0 and state.get('last_update', 0.0) > 0.0
+        mega_ok = state.get('connected', False)
+
+        if not is_fresh:
+            self.state(GREY, 'No Science Telemetry')
+        elif not mega_ok:
+            self.state(AMBER, f'Rover alive, Mega offline ({age:.1f}s)')
+        else:
+            self.state(GREEN, f'Arduino Mega Ready ({age * 1000:.0f}ms)')
+
+        # Motors 1..5
+        for i in range(1, 6):
+            key = f'm{i}'
+            val = state.get(key, 0)
+            lbl = self.motor_labels.get(key)
+            if lbl:
+                if val:
+                    lbl.setText('ON')
+                    lbl.setStyleSheet(
+                        'background: #27ae60; color: #ffffff; font-weight: bold; '
+                        'border-radius: 3px; padding: 2px 4px; font-size: 10px;'
+                    )
+                else:
+                    lbl.setText('OFF')
+                    lbl.setStyleSheet(
+                        'background: #34495e; color: #bdc3c7; font-weight: bold; '
+                        'border-radius: 3px; padding: 2px 4px; font-size: 10px;'
+                    )
+
+        # LED
+        led_val = state.get('led', 0)
+        if led_val:
+            self.lbl_led_status.setText('ON')
+            self.lbl_led_status.setStyleSheet(
+                'background: #f39c12; color: #ffffff; font-weight: bold; '
+                'border-radius: 3px; padding: 2px 4px; font-size: 10px;'
+            )
+        else:
+            self.lbl_led_status.setText('OFF')
+            self.lbl_led_status.setStyleSheet(
+                'background: #34495e; color: #bdc3c7; font-weight: bold; '
+                'border-radius: 3px; padding: 2px 4px; font-size: 10px;'
+            )
+
+        # Servo
+        servo_val = state.get('servo', 0)
+        self.lbl_servo_status.setText(f'{servo_val}°')
+
+
 class RadioWorker(QThread):
     line = pyqtSignal(str)
 
@@ -960,6 +1227,20 @@ class MainWindow(QWidget):
         self.hats = []
         self.keys = set()
         self.keyboard_drive = False
+
+        # Science actuators state tracking
+        self.sci_seq = 0
+        self.sci_lock = threading.Lock()
+        self.sci_cmd = {
+            'm1': 0, 'm2': 0, 'm3': 0, 'm4': 0, 'm5': 0,
+            'led': 0, 'servo': 0
+        }
+        self.sci_confirmed = {
+            'm1': 0, 'm2': 0, 'm3': 0, 'm4': 0, 'm5': 0,
+            'led': 0, 'servo': 0,
+            'connected': False,
+            'last_update': 0.0
+        }
 
         # pygame MUST be up before the poll timer fires
         pygame.init()
@@ -1035,13 +1316,22 @@ class MainWindow(QWidget):
                            ('ign', 'Ignored frames (wrong source)')])
 
         # Lay out in a 3-column grid: row0 = joystick | drive | arm
-        #                              row1 = XBee TX  | robot ACK | (empty)
+        #                              row1 = XBee TX  | robot ACK | science actuators
         grid = QGridLayout()
         grid.addWidget(self.joy_p,  0, 0)
         grid.addWidget(self.cmd,    0, 1)
         grid.addWidget(self.arm_p,  0, 2)
         grid.addWidget(self.tx_p,   1, 0)
         grid.addWidget(self.rx_p,   1, 1)
+
+        # Science Actuators panel
+        self.sci_p = SciencePanel(
+            on_toggle_motor=self.toggle_motor,
+            on_toggle_led=self.toggle_led,
+            on_step_servo=self.step_servo,
+            on_stop_all=self.stop_all_motors,
+        )
+        grid.addWidget(self.sci_p,  1, 2)
 
         # ---- radio check tab ----
         radio = QWidget()
@@ -1094,6 +1384,10 @@ class MainWindow(QWidget):
             t.timeout.connect(fn)
             t.start(ms)
             self.timers.append(t)
+
+        # ---- background UDP telemetry receiver (port 9003) ----
+        self.udp_rx = UdpTelemetryReceiver(UDP_STATUS_PORT, self.on_telemetry_rx)
+        self.udp_rx.start()
 
     # ---------------- helpers ----------------
     def refresh_ports(self):
@@ -1211,11 +1505,130 @@ class MainWindow(QWidget):
         else:
             self.tx.on_joy(axes, buttons, raw_axes=self.raw_axes, hats=self.hats)
 
+    # ---------------- science actuator methods ----------------
+    def on_telemetry_rx(self, data):
+        """Callback from background UDP telemetry receiver."""
+        self.on_radio(data)
+
+    def send_science_cmd(self):
+        """Dispatch dual-redundant 'S' packet via active link and BaseMaster UDP hub."""
+        with self.sci_lock:
+            self.sci_seq = (self.sci_seq + 1) & 0xFF
+            seq = self.sci_seq
+            m1 = int(bool(self.sci_cmd.get('m1', 0)))
+            m2 = int(bool(self.sci_cmd.get('m2', 0)))
+            m3 = int(bool(self.sci_cmd.get('m3', 0)))
+            m4 = int(bool(self.sci_cmd.get('m4', 0)))
+            m5 = int(bool(self.sci_cmd.get('m5', 0)))
+            led = int(bool(self.sci_cmd.get('led', 0)))
+            servo = max(0, min(180, int(self.sci_cmd.get('servo', 0))))
+
+        pkt = pack_science(seq, m1, m2, m3, m4, m5, led, servo)
+
+        sent = False
+        if self.link and self.link.connected:
+            sent = self.link.send(pkt)
+
+        # Fallback / Dual broadcast to local Master Hub (UDP 9001)
+        if not (self.link and isinstance(self.link, UdpLink)):
+            try:
+                import socket
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.sendto(pkt, (MASTER_IP, UDP_JOY_PORT))
+                s.close()
+                sent = True
+            except Exception:
+                pass
+
+        return sent
+
+    def toggle_motor(self, idx):
+        """Toggle peristaltic motor (1..5) between ON and OFF."""
+        key = f'm{idx}'
+        with self.sci_lock:
+            curr = self.sci_cmd.get(key, self.sci_confirmed.get(key, 0))
+            self.sci_cmd[key] = 0 if curr else 1
+        self.send_science_cmd()
+
+    def toggle_led(self):
+        """Toggle illumination / UV LED between ON and OFF."""
+        with self.sci_lock:
+            curr = self.sci_cmd.get('led', self.sci_confirmed.get('led', 0))
+            self.sci_cmd['led'] = 0 if curr else 1
+        self.send_science_cmd()
+
+    def step_servo(self, delta):
+        """Step sample carousel servo angle by delta degrees (0 to 180)."""
+        with self.sci_lock:
+            curr = self.sci_cmd.get('servo', self.sci_confirmed.get('servo', 0))
+            self.sci_cmd['servo'] = max(0, min(180, curr + delta))
+        self.send_science_cmd()
+
+    def stop_all_motors(self):
+        """Emergency stop: Turn all 5 peristaltic motors OFF immediately."""
+        with self.sci_lock:
+            for i in range(1, 6):
+                self.sci_cmd[f'm{i}'] = 0
+        self.send_science_cmd()
+
+    def update_science_telemetry(self, sc):
+        """Update confirmed actuator states from received rover telemetry."""
+        if not isinstance(sc, dict):
+            return
+        with self.sci_lock:
+            for k in ('m1', 'm2', 'm3', 'm4', 'm5', 'led', 'servo'):
+                if k in sc:
+                    self.sci_confirmed[k] = int(sc[k])
+                    if self.sci_cmd.get(k) == self.sci_confirmed[k]:
+                        self.sci_cmd[k] = self.sci_confirmed[k]
+            if 'connected' in sc:
+                self.sci_confirmed['connected'] = bool(sc['connected'])
+            self.sci_confirmed['last_update'] = time.monotonic()
+
     def eventFilter(self, obj, ev):
         t = ev.type()
         if t == QEvent.ApplicationDeactivate:
             self.keys.clear()
-        elif t in (QEvent.KeyPress, QEvent.KeyRelease) and self.keyboard_drive:
+            return False
+
+        if t == QEvent.KeyPress:
+            # Intercept Science Actuator shortcuts: Ctrl + (1-6) and Ctrl + (Left/Right)
+            if ev.modifiers() & Qt.ControlModifier:
+                k = ev.key()
+
+                # Motor 1..5, LED 6, All-Stop Z
+                if not ev.isAutoRepeat():
+                    if k in (Qt.Key_1, getattr(Qt, 'Key_Numpad1', 0x01000031)):
+                        self.toggle_motor(1)
+                        return True
+                    elif k in (Qt.Key_2, getattr(Qt, 'Key_Numpad2', 0x01000032)):
+                        self.toggle_motor(2)
+                        return True
+                    elif k in (Qt.Key_3, getattr(Qt, 'Key_Numpad3', 0x01000033)):
+                        self.toggle_motor(3)
+                        return True
+                    elif k in (Qt.Key_4, getattr(Qt, 'Key_Numpad4', 0x01000034)):
+                        self.toggle_motor(4)
+                        return True
+                    elif k in (Qt.Key_5, getattr(Qt, 'Key_Numpad5', 0x01000035)):
+                        self.toggle_motor(5)
+                        return True
+                    elif k in (Qt.Key_6, getattr(Qt, 'Key_Numpad6', 0x01000036)):
+                        self.toggle_led()
+                        return True
+                    elif k == Qt.Key_Z:
+                        self.stop_all_motors()
+                        return True
+
+                # Servo angle: Ctrl + Left Arrow / Ctrl + Right Arrow
+                if k == Qt.Key_Left:
+                    self.step_servo(-15)
+                    return True
+                elif k == Qt.Key_Right:
+                    self.step_servo(15)
+                    return True
+
+        if t in (QEvent.KeyPress, QEvent.KeyRelease) and self.keyboard_drive:
             name = KEYMAP.get(ev.key())
             if name is None or isinstance(QApplication.focusWidget(), QLineEdit):
                 return False
@@ -1274,9 +1687,33 @@ class MainWindow(QWidget):
         if self.auto and self.link and not self.link.connected:
             self.start_connect()
 
-    def on_radio(self, data):                   # XBee thread: ACKs from the robot
-        if self.tx:
-            self.tx.on_radio(data)
+    def on_radio(self, data):                   # XBee & UDP: ACKs and Telemetry from the robot
+        data = bytes(data)
+        if not data:
+            return
+
+        # 1. ACK packet ('A', seq, lost)
+        if data[:1] == b'A' and len(data) == _ACK.size:
+            if self.tx:
+                self.tx.on_radio(data)
+            return
+
+        # 2. Telemetry JSON packet ('T' + json or direct json)
+        json_bytes = None
+        if data[:1] == b'T':
+            json_bytes = data[1:]
+        elif data[:1] == b'{':
+            json_bytes = data
+
+        if json_bytes:
+            try:
+                payload = json.loads(json_bytes.decode('utf-8', errors='ignore'))
+                if isinstance(payload, dict):
+                    if "science" in payload:
+                        self.update_science_telemetry(payload["science"])
+                return
+            except Exception:
+                pass
 
     # ---------------- tickers ----------------
     def tx_tick(self):
@@ -1421,8 +1858,16 @@ class MainWindow(QWidget):
             if link:
                 self.rx_p.put(src=link.last_src or '-', ign=link.rx_ignored)
 
+        # ---- Science Actuators panel ----
+        if hasattr(self, 'sci_p'):
+            with self.sci_lock:
+                sci_copy = dict(self.sci_confirmed)
+            self.sci_p.update_display(sci_copy)
+
     def closeEvent(self, e):
         self.auto = False
+        if hasattr(self, 'udp_rx') and self.udp_rx:
+            self.udp_rx.stop()
         for t in self.timers:
             t.stop()
         if self.radio_worker and self.radio_worker.isRunning():
@@ -1457,7 +1902,7 @@ def main():
     app = QApplication(sys.argv)
     win = MainWindow()
     app.installEventFilter(win)
-    win.resize(1100, 680)
+    win.resize(1150, 720)
     win.show()
     sys.exit(app.exec_())
 

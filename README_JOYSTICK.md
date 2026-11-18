@@ -1,13 +1,13 @@
 # XBee Teleop — Drive + Arm Control
 
-Wireless Xbox gamepad control for a ROS 2 rover, transmitted over XBee DigiMesh radio.
+Wireless Xbox gamepad control for a ROS 2 rover, transmitted over dual-redundant XBee DigiMesh radio and Wi-Fi UDP.
 
 ```
-Xbox Pad  ──►  xbee_teleop_windows.py  ══ XBee RF ══►  rx_node (ROS 2)
-               (Windows base station)                   (rover onboard)
-                                                           │
-                                                     /cmd_vel  (drive)
-                                                     /arm_vel  (arm)
+Xbox Pad  ──►  xbee_teleop_windows.py  ──►  UDP 9001 ──►  base_master.py  ══ XBee RF ══►  rx_node (ROS 2)
+               (Windows base station)                                   ─ ─ Wi-Fi UDP ─ ─►  (rover onboard)
+                                                                                                   │
+                                                                                             /cmd_vel  (drive)
+                                                                                             /arm_vel  (arm)
 ```
 
 ---
@@ -130,6 +130,26 @@ The arm uses a **button + trigger/bumper** combination:
 > **Trigger threshold:** A trigger must be pressed more than ~30% from its rest position to register as a command. Adjust `trigger_threshold` in the CONFIG block of `xbee_teleop_windows.py` if needed.
 
 > **Multiple joints:** You can command multiple joints simultaneously (e.g., hold A + B + LT to contract both actuator 1 and 2 at the same time).
+
+---
+
+### Science Mission Actuator Control (Peristaltic Pumps, LED & Servo)
+
+The teleoperation GUI (`xbee_teleop_windows.py`) integrates full science actuator controls with dedicated keyboard shortcuts, action buttons, and a live **Science Actuators Panel**:
+
+| Keyboard Shortcut | Actuator | Action |
+|-------------------|----------|--------|
+| **Ctrl + 1** | Motor 1 (Sample 1) | Toggle ON / OFF |
+| **Ctrl + 2** | Motor 2 (Sample 2) | Toggle ON / OFF |
+| **Ctrl + 3** | Motor 3 (Reagent 1) | Toggle ON / OFF |
+| **Ctrl + 4** | Motor 4 (Reagent 2) | Toggle ON / OFF |
+| **Ctrl + 5** | Motor 5 (Flush) | Toggle ON / OFF |
+| **Ctrl + 6** | Illumination / UV LED | Toggle ON / OFF |
+| **Ctrl + ←** | Carousel Servo | Step angle −15° (min 0°) |
+| **Ctrl + →** | Carousel Servo | Step angle +15° (max 180°) |
+| **Ctrl + Z** | All Motors Stop | Emergency all 5 motors OFF |
+
+> **Confirmed Rover Telemetry:** The UI strictly updates actuator status indicators (`ON`/`OFF`, angles) only when confirmed telemetry arrives from the rover (`/science/actuator_status` feedback from the Arduino Mega 2560 over serial), eliminating optimistic false-positives.
 
 ---
 

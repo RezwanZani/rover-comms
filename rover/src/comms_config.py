@@ -226,3 +226,31 @@ RTCM_TOPIC                    = '/rtcm'
 TELEMETRY_TX_TOPIC            = 'telemetry_tx'
 RTCM_CHUNK_MAX                = 256           # Max fragment size for RTCM frames over radio
 
+# -----------------------------------------------------------------------------
+# SCIENCE / ARDUINO SERIAL BRIDGE
+# -----------------------------------------------------------------------------
+SCIENCE_ARDUINO_PORT          = '/dev/ttyACM0'
+SCIENCE_ARDUINO_BAUD          = 9600
+SCIENCE_CMD_TOPIC             = '/science/actuator_cmd'
+SCIENCE_STATUS_TOPIC          = '/science/actuator_status'
+ROVER_MODE_TOPIC              = '/rover/mode'
+
+# -----------------------------------------------------------------------------
+# SCIENCE PACKET 'S' (Base -> Rover, dual redundant)
+# Format: '<cBBBBBBBB' = 9 bytes
+# -----------------------------------------------------------------------------
+SCIENCE_PACKET_FORMAT         = '<cBBBBBBBB'
+SCIENCE_PACKET_ID             = b'S'
+SCIENCE_PACKET_SIZE           = 9
+
+# -----------------------------------------------------------------------------
+# MODE PACKET 'N' (Base -> Rover, dual redundant)
+# Format: '<cBB' = 3 bytes
+# -----------------------------------------------------------------------------
+MODE_PACKET_FORMAT            = '<cBB'
+MODE_PACKET_ID                = b'N'
+MODE_PACKET_SIZE              = 3
+MODE_TELEOP                   = 0x00
+MODE_AUTONOMOUS               = 0x01
+
+

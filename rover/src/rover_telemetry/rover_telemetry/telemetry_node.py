@@ -168,6 +168,10 @@ class RoverTelemetryNode(Node):
         self.arm_state = [0.0, 0.0, 0.0, 0.0, 0.0]
         self.active_flag = "NORMAL_TELEOP"
         self.radio_rx_stats = {}
+        self.science_state = {
+            "m1": 0, "m2": 0, "m3": 0, "m4": 0, "m5": 0,
+            "led": 0, "servo": 0, "connected": False
+        }
 
         # ------------------------------------------------------------------ #
         # Internal Telemetry Publisher (for Rover Comms Master to send over XBee)
@@ -208,6 +212,8 @@ class RoverTelemetryNode(Node):
         self.create_subscription(Float32MultiArray, '/motor_diagnostics', self._on_motors, 10)
         self.create_subscription(Float32MultiArray, '/arm_vel', self._on_arm, 10)
         self.create_subscription(String, 'xbee_rx/status', self._on_xbee_rx_status, 10)
+        self.create_subscription(String, '/science/actuator_status', self._on_science_status, 10)
+        self.create_subscription(String, '/rover/mode', self._on_rover_mode, 10)
 
         # ------------------------------------------------------------------ #
         # Timers
@@ -349,6 +355,23 @@ class RoverTelemetryNode(Node):
         except Exception:
             pass
 
+    def _on_science_status(self, msg):
+        try:
+            d = json.loads(msg.data)
+            with self.lock:
+                self.science_state.update(d)
+        except Exception:
+            pass
+
+    def _on_rover_mode(self, msg):
+        try:
+            mode = str(msg.data).strip().upper()
+            if mode:
+                with self.lock:
+                    self.active_flag = mode
+        except Exception:
+            pass
+
     # ===================================================================== #
     # Telemetry Assembly & Transmission
     # ===================================================================== #
@@ -425,7 +448,8 @@ class RoverTelemetryNode(Node):
                     ),
                     "rtcm_count": int(self.radio_rx_stats.get("rtcm_count", 0)),
                     "rtcm_age_s": self.radio_rx_stats.get("last_rtcm_age", None),
-                }
+                },
+                "science": dict(self.science_state),
             }
 
         return payload

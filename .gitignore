@@ -72,6 +72,7 @@ venv.bak/
 # -----------------------------------------------------------------------------
 # 3. Node.js & React Frontend (base_station/rover-gui/frontend)
 # -----------------------------------------------------------------------------
+base_station/rover-gui/
 node_modules/
 **/node_modules/
 .pnpm-store/

@@ -251,4 +251,71 @@ DUAL_REDUNDANCY_ENABLED = True
 # Rover failover timeout: seconds of XBee silence before switching to UDP
 XBEE_FAILOVER_TIMEOUT   = 0.35
 
+# -----------------------------------------------------------------------------
+# SCIENCE / ARDUINO SERIAL BRIDGE
+# -----------------------------------------------------------------------------
+
+# Serial port on the Rover (Jetson) where the Arduino Mega is connected.
+# Change to match your hardware: '/dev/ttyACM0', '/dev/ttyUSB0', etc.
+# A udev rule can create a stable symlink like '/dev/arduino_science'.
+SCIENCE_ARDUINO_PORT    = '/dev/ttyACM0'
+
+# Baud rate used by the Arduino Mega sketch (must match Serial.begin() value)
+SCIENCE_ARDUINO_BAUD    = 9600
+
+# ROS 2 topic the science_node subscribes to for actuator commands
+SCIENCE_CMD_TOPIC       = '/science/actuator_cmd'
+
+# ROS 2 topic the science_node publishes Arduino feedback to
+SCIENCE_STATUS_TOPIC    = '/science/actuator_status'
+
+# ROS 2 topic for rover operating mode changes
+ROVER_MODE_TOPIC        = '/rover/mode'
+
+# -----------------------------------------------------------------------------
+# CAMERA STREAM URLS
+# Five MJPEG camera streams (edit IPs/ports to match rover's camera server).
+# Same list is used by both the main dashboard and the Science Mission page.
+# Format: HTTP MJPEG stream URL.  Replace 192.168.1.100 with the rover's IP.
+# -----------------------------------------------------------------------------
+CAMERA_STREAMS = [
+    {"id": "cam1", "label": "DRIVE CAM 01",   "url": "http://192.168.1.100:8080/stream1"},
+    {"id": "cam2", "label": "DRIVE CAM 02",   "url": "http://192.168.1.100:8081/stream1"},
+    {"id": "cam3", "label": "AUX / REAR",     "url": "http://192.168.1.100:8082/stream1"},
+    {"id": "cam4", "label": "ARM CAM",        "url": "http://192.168.1.100:8083/stream1"},
+    {"id": "cam5", "label": "SCIENCE CAM",    "url": "http://192.168.1.100:8084/stream1"},
+]
+
+# -----------------------------------------------------------------------------
+# SCIENCE PACKET  'S'  (Base → Rover, dual redundant)
+# Controls 5 peristaltic motors, 1 LED, and 1 servo on the Arduino Mega.
+# Format: '<cBBBBBBBB'  = 9 bytes
+#   [0]  'S'             — packet type identifier
+#   [1]  seq (uint8)     — rolling sequence number for latency ordering
+#   [2]  m1  (uint8)     — Motor 1: 0=OFF, 1=ON
+#   [3]  m2  (uint8)     — Motor 2: 0=OFF, 1=ON
+#   [4]  m3  (uint8)     — Motor 3: 0=OFF, 1=ON
+#   [5]  m4  (uint8)     — Motor 4: 0=OFF, 1=ON
+#   [6]  m5  (uint8)     — Motor 5: 0=OFF, 1=ON
+#   [7]  led (uint8)     — LED: 0=OFF, 1=ON
+#   [8]  servo (uint8)   — Servo angle: 0–180 degrees
+# -----------------------------------------------------------------------------
+SCIENCE_PACKET_FORMAT   = '<cBBBBBBBB'
+SCIENCE_PACKET_ID       = b'S'
+SCIENCE_PACKET_SIZE     = 9
+
+# -----------------------------------------------------------------------------
+# MODE PACKET  'N'  (Base → Rover, dual redundant)
+# Switches the rover between TELEOP and AUTONOMOUS operating modes.
+# Format: '<cBB'  = 3 bytes
+#   [0]  'N'             — packet type identifier
+#   [1]  seq (uint8)     — rolling sequence number
+#   [2]  mode (uint8)    — 0x00 = TELEOP,  0x01 = AUTONOMOUS
+# -----------------------------------------------------------------------------
+MODE_PACKET_FORMAT      = '<cBB'
+MODE_PACKET_ID          = b'N'
+MODE_PACKET_SIZE        = 3
+MODE_TELEOP             = 0x00
+MODE_AUTONOMOUS         = 0x01
+
 

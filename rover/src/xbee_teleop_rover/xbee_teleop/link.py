@@ -34,6 +34,12 @@ _MOTION = struct.Struct('<cBhhhhhhh')
 # ACK from rover to base station: 'A' last_seq lost  (5 bytes)
 _ACK = struct.Struct('<cBH')
 
+# Science actuator packet: 'S' seq m1 m2 m3 m4 m5 led servo  (9 bytes)
+_SCIENCE = struct.Struct('<cBBBBBBBB')
+
+# Operational mode packet: 'N' seq mode  (3 bytes: 0=TELEOP, 1=AUTONOMOUS)
+_MODE = struct.Struct('<cBB')
+
 
 # ---------------------------------------------------------------------------
 # Helper: clamp a float to a signed 16-bit integer (×1000 fixed-point)
@@ -72,6 +78,22 @@ def pack_ack(seq, lost):
     return _ACK.pack(b'A', seq & 0xFF, lost & 0xFFFF)
 
 
+def pack_science(seq, m1, m2, m3, m4, m5, led, servo):
+    """Pack Science actuator command packet ('S', 9 bytes)."""
+    return _SCIENCE.pack(
+        b'S', seq & 0xFF,
+        int(bool(m1)), int(bool(m2)), int(bool(m3)), int(bool(m4)), int(bool(m5)),
+        int(bool(led)), max(0, min(180, int(servo)))
+    )
+
+
+def pack_mode(seq, mode):
+    """Pack Rover operational mode toggle packet ('N', 3 bytes).
+    mode: 0 = TELEOP, 1 = AUTONOMOUS
+    """
+    return _MODE.pack(b'N', seq & 0xFF, int(mode) & 0xFF)
+
+
 # ---------------------------------------------------------------------------
 # Unpack (handles all packet types)
 # ---------------------------------------------------------------------------
@@ -81,6 +103,8 @@ def unpack(data):
     Returns one of:
       ('motion', seq, vx, wz, act1, act2, act3, wrist, gripper)  -- new combined packet
       ('cmd',    seq, vx, wz)                                     -- legacy drive-only
+      ('science', seq, m1, m2, m3, m4, m5, led, servo)           -- science actuators
+      ('mode',    seq, mode)                                      -- operational mode
       ('ack',    seq, lost)                                        -- rover ACK
       None                                                         -- unknown / corrupt
     """
@@ -99,12 +123,23 @@ def unpack(data):
         _, seq, vx, wz = _CMD.unpack(data)
         return ('cmd', seq, vx / 1000.0, wz / 1000.0)
 
+    # Science actuator packet
+    if data[:1] == b'S' and len(data) == _SCIENCE.size:
+        _, seq, m1, m2, m3, m4, m5, led, servo = _SCIENCE.unpack(data)
+        return ('science', seq, m1, m2, m3, m4, m5, led, servo)
+
+    # Operational mode packet
+    if data[:1] == b'N' and len(data) == _MODE.size:
+        _, seq, mode = _MODE.unpack(data)
+        return ('mode', seq, mode)
+
     # ACK from rover
     if data[:1] == b'A' and len(data) == _ACK.size:
         _, seq, lost = _ACK.unpack(data)
         return ('ack', seq, lost)
 
     return None
+
 
 
 def norm_addr(a):
