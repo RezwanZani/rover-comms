@@ -22,39 +22,11 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String, UInt8MultiArray
 
-# Safe import from central comms_config
-def _find_comms_config():
-    cur = os.path.dirname(os.path.abspath(__file__))
-    for _ in range(8):
-        if os.path.isfile(os.path.join(cur, 'comms_config.py')):
-            return cur
-        if os.path.isfile(os.path.join(cur, 'src', 'comms_config.py')):
-            return os.path.join(cur, 'src')
-        parent = os.path.dirname(cur)
-        if parent == cur:
-            break
-        cur = parent
-    ws_fallback = os.path.expanduser('~/Desktop/rover_com/rover/src')
-    if os.path.isfile(os.path.join(ws_fallback, 'comms_config.py')):
-        return ws_fallback
-    return None
-
-_cfg_path = _find_comms_config()
-if _cfg_path and _cfg_path not in sys.path:
-    sys.path.insert(0, _cfg_path)
-
-try:
-    from comms_config import (
-        SCIENCE_ARDUINO_PORT,
-        SCIENCE_ARDUINO_BAUD,
-        SCIENCE_CMD_TOPIC,
-        SCIENCE_STATUS_TOPIC,
-    )
-except ImportError:
-    SCIENCE_ARDUINO_PORT = '/dev/ttyACM0'
-    SCIENCE_ARDUINO_BAUD = 9600
-    SCIENCE_CMD_TOPIC = '/science/actuator_cmd'
-    SCIENCE_STATUS_TOPIC = '/science/actuator_status'
+# Default Arduino Mega parameters (override via params.yaml or ROS launch)
+SCIENCE_ARDUINO_PORT = '/dev/ttyACM0'
+SCIENCE_ARDUINO_BAUD = 9600
+SCIENCE_CMD_TOPIC = '/science/actuator_cmd'
+SCIENCE_STATUS_TOPIC = '/science/actuator_status'
 
 
 class ScienceNode(Node):

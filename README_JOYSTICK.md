@@ -242,8 +242,7 @@ source install/setup.bash
 
 **Run:**
 ```bash
-ros2 launch xbee_teleop rx.launch.py          # rover (headless)
-ros2 launch xbee_teleop rx.launch.py gui:=true  # rover with status GUI
+ros2 launch xbee_teleop rx.launch.py          # rover (headless receiver)
 ```
 
 **Monitor topics:**

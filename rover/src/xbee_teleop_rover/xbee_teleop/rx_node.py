@@ -35,37 +35,10 @@ except ImportError:
 
 from xbee_teleop.link import XBeeLink, pack_ack, unpack
 
-# Load shared communication config
-def _find_comms_config():
-    cur = os.path.dirname(os.path.abspath(__file__))
-    for _ in range(8):
-        if os.path.isfile(os.path.join(cur, 'comms_config.py')):
-            return cur
-        if os.path.isfile(os.path.join(cur, 'src', 'comms_config.py')):
-            return os.path.join(cur, 'src')
-        parent = os.path.dirname(cur)
-        if parent == cur:
-            break
-        cur = parent
-    ws_fallback = os.path.expanduser('~/Desktop/rover_com/rover/src')
-    if os.path.isfile(os.path.join(ws_fallback, 'comms_config.py')):
-        return ws_fallback
-    return None
-
-_cfg_path = _find_comms_config()
-if _cfg_path and _cfg_path not in sys.path:
-    sys.path.insert(0, _cfg_path)
-
-try:
-    from comms_config import (
-        ROVER_UDP_LISTEN_IP,
-        ROVER_UDP_LISTEN_PORT,
-        XBEE_FAILOVER_TIMEOUT,
-    )
-except ImportError:
-    ROVER_UDP_LISTEN_IP = '0.0.0.0'
-    ROVER_UDP_LISTEN_PORT = 8888
-    XBEE_FAILOVER_TIMEOUT = 0.35
+# Default network parameters (override via params.yaml or ROS launch)
+ROVER_UDP_LISTEN_IP = '0.0.0.0'
+ROVER_UDP_LISTEN_PORT = 8888
+XBEE_FAILOVER_TIMEOUT = 0.35
 
 
 class RxNode(Node):
@@ -281,6 +254,11 @@ class RxNode(Node):
                 self.act1, self.act2 = a1, a2
                 self.act3, self.wrist = a3, wr
                 self.gripper = gr
+                self.get_logger().info(
+                    f"[RX] seq={seq:3d} | drive: vx={vx:+.3f}  wz={wz:+.3f} | "
+                    f"arm: act1={int(a1):+d}  act2={int(a2):+d}  act3={int(a3):+d}  "
+                    f"wrist={int(wr):+d}  gripper={int(gr):+d}"
+                )
 
             elif m[0] == 'cmd':
                 _, seq, vx, wz = m

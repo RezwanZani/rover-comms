@@ -38,22 +38,94 @@ os.environ.setdefault('SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS', '1')   # keep read
 os.environ.setdefault('PYGAME_HIDE_SUPPORT_PROMPT', '1')
 
 # --------------------------------------------------------------------------
-# CONFIG
+# CONFIG — Standalone & fully independent configuration (no comms_config required)
 # --------------------------------------------------------------------------
-import sys as _sys, os as _os
-_sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), '..'))
-from comms_config import (
-    ROVER_RADIO_ADDR as ROBOT_RADIO_ADDR,
-    TELEOP_XBEE_PORT, XBEE_BAUD_RATE, JOY_INDEX, JOY_DEADZONE,
-    SEND_RATE_HZ, CMD_TIMEOUT, ENABLE_BUTTON, REQUIRE_ENABLE,
-    SCALE_LINEAR, SCALE_ANGULAR, DRIVE_MODE,
-    AXIS_LINEAR, AXIS_ANGULAR, AXIS_LEFT, AXIS_RIGHT,
-    BTN_ACT1, BTN_ACT2, BTN_ACT3, BTN_WRIST,
-    AXIS_LT, AXIS_RT, TRIGGER_THRESHOLD, AXIS_DPAD_Y,
-    UDP_JOY_PORT, UDP_STATUS_PORT, MASTER_IP,
-    scan_available_ports, AVAILABLE_BAUD_RATES,
-    SCIENCE_PACKET_FORMAT, SCIENCE_PACKET_ID, SCIENCE_PACKET_SIZE,
-)
+
+# Hardware Serial Ports
+TELEOP_XBEE_PORT = '/dev/ttyUSB0' if sys.platform != 'win32' else 'COM3'
+XBEE_BAUD_RATE = 115200
+AVAILABLE_BAUD_RATES = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600]
+
+# Target Rover Radio 64-bit Address
+ROBOT_RADIO_ADDR = '0013A200425E94FF'
+
+# Controller Settings
+JOY_INDEX = 0
+JOY_DEADZONE = 0.05
+SEND_RATE_HZ = 20.0
+CMD_TIMEOUT = 0.5
+
+# Deadman & Drive Scales
+ENABLE_BUTTON = 4          # LB — hold to enable drive (if require_enable=True)
+REQUIRE_ENABLE = False     # False = stick alone drives, no need to hold LB
+SCALE_LINEAR = 0.5         # multiply left-stick Y by this for vx (m/s)
+SCALE_ANGULAR = 1.0        # multiply right-stick X by this for wz (rad/s)
+DRIVE_MODE = 'arcade'      # 'arcade' (default) | 'tank'
+
+# Drive axes (0=LX, 1=LY, 2=RX, 3=RY, 4=LT, 5=RT)
+AXIS_LINEAR = 1            # Left Stick Y -> front/back vx
+AXIS_ANGULAR = 2           # Right Stick X -> left/right wz
+AXIS_LEFT = 1              # Tank drive: Left Stick Y
+AXIS_RIGHT = 3             # Tank drive: Right Stick Y
+
+# Arm Buttons & Triggers
+BTN_ACT1 = 0               # A -> Actuator 1
+BTN_ACT2 = 1               # B -> Actuator 2
+BTN_ACT3 = 2               # X -> Actuator 3
+BTN_WRIST = 3              # Y -> Wrist
+AXIS_LT = 4                # LT -> Contract (-1)
+AXIS_RT = 5                # RT -> Expand (+1)
+TRIGGER_THRESHOLD = 0.3    # Trigger press travel to register action
+AXIS_DPAD_Y = 7            # D-Pad Y synthetic axis for gripper
+
+# UDP Hub & Master Ports (optional LAN / local interconnect)
+MASTER_IP = '127.0.0.1'
+UDP_JOY_PORT = 9001
+UDP_STATUS_PORT = 9003
+
+# Science & Mode Packet Protocol
+SCIENCE_PACKET_FORMAT = '<cBBBBBBBB'
+SCIENCE_PACKET_ID = b'S'
+SCIENCE_PACKET_SIZE = 9
+MODE_PACKET_FORMAT = '<cBB'
+MODE_PACKET_ID = b'N'
+MODE_PACKET_SIZE = 3
+
+def scan_available_ports():
+    """Scans physical hardware serial ports and USB adapters across Linux and Windows."""
+    import glob
+    ports = []
+    def _add(p):
+        if p and p not in ports:
+            ports.append(p)
+    if sys.platform != 'win32':
+        for pattern in ['/dev/ttyUSB*', '/dev/ttyACM*', '/dev/rover_*', '/dev/serial/by-id/*', '/dev/serial/by-path/*']:
+            for dev in sorted(glob.glob(pattern)):
+                if os.path.exists(dev):
+                    _add(dev)
+    try:
+        import serial.tools.list_ports
+        for p in serial.tools.list_ports.comports():
+            dev = p.device
+            if sys.platform != 'win32' and dev.startswith('/dev/ttyS'):
+                continue
+            _add(dev)
+    except Exception:
+        pass
+    if sys.platform == 'win32':
+        try:
+            import winreg
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DEVICEMAP\SERIALCOMM")
+            for i in range(256):
+                try:
+                    val = winreg.EnumValue(key, i)
+                    _add(str(val[1]))
+                except OSError:
+                    break
+            winreg.CloseKey(key)
+        except Exception:
+            pass
+    return ports
 
 CONFIG = dict(
     port=TELEOP_XBEE_PORT,
@@ -852,8 +924,13 @@ class TxCore:
                 self.vx = c['scale_linear']  * (left + right) / 2.0
                 self.wz = c['scale_angular'] * (right - left) / 2.0
             else:
+                ang_axis = c['axis_angular']
+                if ang_axis == 2 and len(buttons) <= 12 and len(axes) > 5 and not getattr(self, 'xin_ok', False):
+                    ang_axis = 3
+                # Left throttle (Left Stick Y) strictly controls front and back speed (vx); left/right is ignored.
                 self.vx = c['scale_linear']  * g(axes, c['axis_linear'])
-                self.wz = c['scale_angular'] * g(axes, c['axis_angular'])
+                # Right throttle (Right Stick X) strictly controls left/right turning (wz); front/back is ignored.
+                self.wz = c['scale_angular'] * g(axes, ang_axis)
         else:
             self.vx = self.wz = 0.0   # deadman released -> stop drive
 
