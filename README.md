@@ -274,22 +274,16 @@ Access via the **"🔬 SCIENCE"** button in the web Topbar or navigate to **`/sc
 
 ## Automated Verification & Bench Testing
 
-You can test the entire dual-redundancy and communication stack on a single development PC without physical radios using virtual serial port pairs:
+Verify protocol packet packing and ROS 2 topic dispatch:
 
 ```bash
-# 1. Create virtual serial loopback pair (/tmp/ttyV0 <-> /tmp/ttyV1)
-python3 create_virtual_pair.py
-
-# 2. Run protocol and packing unit tests
+# 1. Run protocol and packing unit tests
 python3 tests/test_science_and_mode.py
 
-# 3. Run ROS 2 topic dispatch tests
+# 2. Run ROS 2 topic dispatch tests
 source /opt/ros/jazzy/setup.bash
 source rover/install/setup.bash
 python3 tests/test_rx_node_science.py
-
-# 4. Run automated dual redundancy, failover & latency verification
-python3 scratch/test_dual_redundancy_and_latency.py
 ```
 
 Expected output:
@@ -315,11 +309,11 @@ sudo usermod -aG dialout $USER
 sudo chmod 666 /dev/ttyUSB* /dev/ttyACM*
 ```
 
-### 2. Virtual Serial Ports in GUI Dropdown
-If testing on a laptop without physical radios, run `python3 create_virtual_pair.py`. Both `/tmp/ttyV0` and `/tmp/ttyV1` are automatically scanned and will appear in the port selector dropdown on the Web UI.
+### 2. Serial Port Discovery & Hardware XBee Selection
+All physical USB-to-UART adapters (FTDI, CP210x, CH340), udev symlinks (`/dev/rover_*`), and Windows `COM` ports are automatically scanned. They will appear in the port selector dropdown on both the Web UI and Teleop GUI. Ensure the radio's baud rate is set to **115200** (Digi XCTU parameter `BD=7`).
 
 ### 3. Wi-Fi Failover Latency Verification
-If the XBee radio is disconnected or power cycled during operation, the React GUI diagnostics panel will immediately show `WI-FI (UDP)` within $350\text{ ms}$. When the radio reconnects, it returns to `DUAL (Wi-Fi + RF)`.
+If the physical XBee radio is disconnected or power cycled during operation, the React GUI diagnostics panel will immediately show `WI-FI (UDP)` within $350\text{ ms}$. When the radio reconnects, it returns to `DUAL (Wi-Fi + RF)`.
 
 ---
 

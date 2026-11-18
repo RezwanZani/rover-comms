@@ -49,9 +49,8 @@ GPS_BAUD_RATE           = 115200
 
 def scan_available_ports():
     """
-    Scans physical, virtual, and symlinked serial ports across Linux and Windows.
-    Guarantees virtual pairs (/tmp/ttyV0, /tmp/ttyV1, /tmp/tty*), USB adapters,
-    and configured ports appear at the top of the list.
+    Scans physical hardware serial ports and USB adapters across Linux and Windows.
+    Discovers hardware USB-to-UART converters, udev symlinks, and active COM ports.
     """
     import glob, os, sys
     ports = []
@@ -60,25 +59,14 @@ def scan_available_ports():
         if p and p not in ports:
             ports.append(p)
 
-    # 1. Virtual ports in /tmp (socat virtual pairs, pty links)
-    for pattern in ['/tmp/ttyV*', '/tmp/ttyXBee*', '/tmp/tty*']:
-        for vport in sorted(glob.glob(pattern)):
-            if os.path.exists(vport):
-                _add(vport)
-
-    # Explicit virtual pair fallback
-    for vport in ['/tmp/ttyV0', '/tmp/ttyV1']:
-        if os.path.exists(vport):
-            _add(vport)
-
-    # 2. Linux USB & ACM serial devices + udev symlinks
+    # 1. Linux USB & ACM serial devices + udev symlinks
     if sys.platform != 'win32':
         for pattern in ['/dev/ttyUSB*', '/dev/ttyACM*', '/dev/rover_*', '/dev/serial/by-id/*', '/dev/serial/by-path/*']:
             for dev in sorted(glob.glob(pattern)):
                 if os.path.exists(dev):
                     _add(dev)
 
-    # 3. Pyserial standard detection (hardware COM ports & USB-to-UART)
+    # 2. Pyserial standard detection (hardware COM ports & USB-to-UART)
     try:
         import serial.tools.list_ports
         for p in serial.tools.list_ports.comports():
@@ -90,7 +78,7 @@ def scan_available_ports():
     except Exception:
         pass
 
-    # 4. Windows registry extra scan
+    # 3. Windows registry extra scan
     if sys.platform == 'win32':
         try:
             import winreg

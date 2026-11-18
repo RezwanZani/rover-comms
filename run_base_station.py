@@ -11,7 +11,7 @@ Builds the web frontend application and launches all Base Station components in 
 
 Usage:
   python3 run_base_station.py
-  python3 run_base_station.py /tmp/ttyV0
+  python3 run_base_station.py /dev/ttyUSB0
   python3 run_base_station.py --port /dev/ttyUSB0
   python3 run_base_station.py --dev        # Use live dev server instead of prebuilt
   python3 run_base_station.py --no-build   # Skip rebuilding web assets

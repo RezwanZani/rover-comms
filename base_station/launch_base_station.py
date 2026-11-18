@@ -16,7 +16,7 @@ Features:
   - Clean lifecycle: Ctrl+C or closing Teleop GUI shuts down all child processes cleanly.
   - Automatic virtualenv detection for backend.
   - CLI flags:
-      port            : Serial port for Base XBee radio (e.g. /tmp/ttyV0, /dev/ttyUSB0, COM3)
+      port            : Serial port for Base XBee radio (e.g. /dev/ttyUSB0, COM3)
       --port <PORT>   : Explicit serial port flag
       --dev           : Run frontend in live Vite dev mode instead of prebuilt production mode
       --no-build      : Skip building the frontend (use existing dist/)
@@ -272,7 +272,7 @@ class BaseStationSupervisor:
 
 def main():
     parser = argparse.ArgumentParser(description="Rover Base Station Orchestrator")
-    parser.add_argument('port', nargs='?', default=None, help="Serial port for Base XBee radio (e.g. /tmp/ttyV0, COM3)")
+    parser.add_argument('port', nargs='?', default=None, help="Serial port for Base XBee radio (e.g. /dev/ttyUSB0, COM3)")
     parser.add_argument('--port', dest='port_flag', default=None, help="Explicit port flag")
     parser.add_argument('--dev', action='store_true', help="Run frontend in live Vite dev mode (default: prebuilt production)")
     parser.add_argument('--no-build', action='store_true', help="Skip re-building the frontend (use existing dist/)")
