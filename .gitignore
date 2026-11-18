@@ -1,0 +1,150 @@
+# =============================================================================
+#  ROVER COM (.gitignore)
+#  Comprehensive Git Ignore for Multi-Tier Autonomous Rover & Base Station:
+#  - ROS 2 Jazzy (Colcon workspaces)
+#  - Python (PyQt5, Pygame, FastAPI, PySerial)
+#  - Node.js / React / Vite Frontend
+#  - Hardware Telemetry Logs & Dumps
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 1. ROS 2 & Colcon Build Artifacts
+# -----------------------------------------------------------------------------
+build/
+install/
+log/
+**/build/
+**/install/
+**/log/
+COLCON_IGNORE
+**/COLCON_IGNORE
+
+# ROS 2 bag recordings
+*.bag
+*.db3
+*.db3-journal
+**/rosbag2_*/
+
+# -----------------------------------------------------------------------------
+# 2. Python Bytecode, Caches & Packaging
+# -----------------------------------------------------------------------------
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+*.egg-info/
+**/*.egg-info/
+.installed.cfg
+*.egg
+eggs/
+.eggs/
+dist/
+build/
+develop-eggs/
+parts/
+bin/
+sdist/
+wheels/
+*.whl
+
+# Testing & Coverage
+.pytest_cache/
+**/.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# Python Virtual Environments
+.venv/
+**/.venv/
+venv/
+**/venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+
+# -----------------------------------------------------------------------------
+# 3. Node.js & React Frontend (base_station/rover-gui/frontend)
+# -----------------------------------------------------------------------------
+node_modules/
+**/node_modules/
+.pnpm-store/
+**/.pnpm-store/
+
+# Vite / React build outputs
+dist/
+dist-ssr/
+**/dist/
+**/dist-ssr/
+.vite/
+**/.vite/
+
+# Package manager logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# -----------------------------------------------------------------------------
+# 4. Runtime Logs, Telemetry Recordings & Hardware Dumps
+# -----------------------------------------------------------------------------
+# All runtime log files
+*.log
+**/*.log
+xbee_teleop_error.log
+**/xbee_teleop_error.log
+
+# Telemetry CSV recordings (keep logs/ directory structure, ignore actual data dumps)
+base_station/rover-gui/backend/logs/*.csv
+**/logs/*.csv
+
+# Network packet captures
+*.pcap
+*.pcapng
+
+# -----------------------------------------------------------------------------
+# 5. Local Environment & Secrets
+# -----------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.local
+
+# -----------------------------------------------------------------------------
+# 6. IDEs, Editors & OS Files
+# -----------------------------------------------------------------------------
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+desktop.ini
+$RECYCLE.BIN/
+
+# Editors
+.vscode/
+**/.vscode/
+.idea/
+**/.idea/
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+*~
+*.bak
+*.tmp
