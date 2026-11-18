@@ -42,7 +42,11 @@ os.environ.setdefault('PYGAME_HIDE_SUPPORT_PROMPT', '1')
 # --------------------------------------------------------------------------
 
 # Hardware Serial Ports
-TELEOP_XBEE_PORT = '/dev/ttyUSB0' if sys.platform != 'win32' else 'COM3'
+BASE_XBEE_BY_ID = '/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_B0025BN0-if00-port0'
+if sys.platform != 'win32':
+    TELEOP_XBEE_PORT = BASE_XBEE_BY_ID if os.path.exists(BASE_XBEE_BY_ID) else '/dev/ttyUSB0'
+else:
+    TELEOP_XBEE_PORT = 'COM3'
 XBEE_BAUD_RATE = 115200
 AVAILABLE_BAUD_RATES = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600]
 
@@ -793,6 +797,7 @@ def radio_at_session(port, baud, fix):
 
 
 def radio_api_session(port, baud, send, log=print):
+    from digi.xbee.devices import XBeeDevice
     dev = XBeeDevice(port, baud)
     dev.open()
     try:
@@ -1957,12 +1962,16 @@ class MainWindow(QWidget):
         # ---- XBee TX panel ----
         if tx is not None:
             sending = tx['link'] and tx['rate'] > 0.5
-            self.tx_p.state(GREEN if sending else (AMBER if tx['link'] else RED),
-                            'radio sending (does NOT prove robot software is running)' if sending
-                            else ('radio open, idle' if tx['link'] else 'radio not open'))
+            is_self = bool(tx['local'] and tx['remote'] and tx['local'].upper() == tx['remote'].upper())
+            if is_self:
+                self.tx_p.state(RED, '⚠️ ERROR: Transmitting to self! Select the OTHER XBee port')
+            else:
+                self.tx_p.state(GREEN if sending else (AMBER if tx['link'] else RED),
+                                'radio sending (does NOT prove robot software is running)' if sending
+                                else ('radio open, idle' if tx['link'] else 'radio not open'))
             self.tx_p.put(port=f"{tx['port']} @ {tx['baud']}", local=tx['local'] or '-', remote=tx['remote'],
                           sent=tx['sent'], rate=f"{tx['rate']:.1f} Hz", ok=f"{tx['tx_ok']} / {tx['tx_fail']}",
-                          why=tx['why'] or '-', err=tx['err'] or '-')
+                          why=tx['why'] or '-', err=tx['err'] or ('Sending to own address!' if is_self else '-'))
         else:
             self.tx_p.state(GREY, 'not connected')
             self.tx_p.clear()
